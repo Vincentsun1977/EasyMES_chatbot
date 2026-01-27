@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chatbot</title>
+    <link rel="stylesheet" href="/easymes/static/chat.css?v=3">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Chat Header -->
+        <div class="chat-header">
+            <h2>小易 - EasyMES AI助手</h2>
+            <div class="header-actions">
+                <button id="clearBtn" class="btn-icon" title="清空对话">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Chat Messages -->
+        <div id="chatMessages" class="chat-messages">
+            <div class="message bot-message">
+                <div class="message-avatar bot-avatar">小易</div>
+                <div class="message-content">
+                    <p>您好！我是小易，我可以回答关于EasyMES的相关问题，比如：<br>
+                        1. 某月某产线的转序数量<br>
+                        2. 某操作工人某天的完成数量<br>
+                        3. 某订单/产品的参数<br>
+                        <br>
+                        <strong style="color: #ff6b35;">⚠️ 注意：请尽量提供具体的信息以便我更好地帮助您，比如订单号、日期等。</strong>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Input -->
+        <div class="chat-input-container">
+            <form id="chatForm">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="输入您的问题..." 
+                    rows="1"
+                    maxlength="2000"
+                ></textarea>
+                <button type="submit" id="sendBtn" class="send-btn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                    </svg>
+                </button>
+            </form>
+        </div>
+
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="connection-status hidden">
+            <span class="status-dot"></span>
+            <span class="status-text">连接中...</span>
+        </div>
+    </div>
+
+    <script src="/easymes/static/chat.js?v=2"></script>
+</body>
+</html>
