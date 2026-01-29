@@ -22,12 +22,21 @@ async def chat(request: ChatRequest):
         Chat response with answer and conversation_id
     """
     try:
+        logger.info(f"=== CHAT API REQUEST ===")
+        logger.info(f"Query: '{request.query}'")
+        logger.info(f"User: {request.user}")
+        logger.info(f"Conversation ID: {request.conversation_id}")
+        logger.info(f"Inputs: {request.inputs}")
+        
         response = await dify_client.send_message(
             query=request.query,
             user=request.user,
             conversation_id=request.conversation_id,
             inputs=request.inputs
         )
+        
+        logger.info(f"=== CHAT API RESPONSE ===")
+        logger.info(f"Dify Response: {json.dumps(response, ensure_ascii=False, indent=2)}")
         
         return ChatResponse(
             answer=response.get("answer", ""),
@@ -51,7 +60,14 @@ async def chat_stream(request: ChatRequest):
     Returns:
         Server-Sent Events stream
     """
+    logger.info(f"=== CHAT STREAM API REQUEST ===")
+    logger.info(f"Query: '{request.query}'")
+    logger.info(f"User: {request.user}")
+    logger.info(f"Conversation ID: {request.conversation_id}")
+    logger.info(f"Inputs: {request.inputs}")
+    
     async def event_generator():
+        chunk_count = 0
         try:
             async for chunk in dify_client.stream_message(
                 query=request.query,
@@ -59,6 +75,9 @@ async def chat_stream(request: ChatRequest):
                 conversation_id=request.conversation_id,
                 inputs=request.inputs
             ):
+                chunk_count += 1
+                logger.info(f"=== STREAM CHUNK {chunk_count} ===")
+                logger.info(f"Chunk: {chunk}")
                 # Forward the SSE event
                 yield f"data: {chunk}\n\n"
         except Exception as e:

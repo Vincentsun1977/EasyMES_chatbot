@@ -6,9 +6,9 @@
 }
 
 :root {
-    --red-1: #ff4d4f;
-    --red-2: #e11d48;
-    --red-3: #be123c;
+    --red-1: #FF000F;
+    --red-2: #FF000F;
+    --red-3: #FF000F;
     --gray-1: #f7f7f7;
     --gray-2: #e5e7eb;
     --gray-3: #9ca3af;
@@ -18,9 +18,9 @@
 }
 
 body {
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: radial-gradient(circle at 20% 20%, rgba(225, 29, 72, 0.08), transparent 40%),
-                radial-gradient(circle at 80% 0%, rgba(255, 77, 79, 0.1), transparent 45%),
+    font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(circle at 20% 20%, rgba(255, 0, 15, 0.08), transparent 40%),
+                radial-gradient(circle at 80% 0%, rgba(255, 0, 15, 0.1), transparent 45%),
                 linear-gradient(135deg, #ffffff 0%, #f2f2f2 100%);
     height: 100vh;
     overflow: hidden;
@@ -45,9 +45,11 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 18px 22px;
-    background: linear-gradient(120deg, var(--red-1) 0%, var(--red-2) 45%, var(--red-3) 100%);
+    background: url('/static-debug/chatbot.png') no-repeat center center;
+    background-size: 100%;
     color: #ffffff;
     position: relative;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
 }
 
 .chat-header::after {
@@ -119,11 +121,19 @@ body {
     font-size: 14px;
     font-weight: 800;
     flex-shrink: 0;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
 }
 
-.bot-avatar { background: linear-gradient(135deg, var(--red-1), var(--red-3)); color: #fff; }
-.user-avatar { background: linear-gradient(135deg, #4b5563, #111827); color: #fff; }
+.bot-avatar { 
+    background: transparent; 
+    color: #FF000F; 
+}
+.user-avatar { 
+    background-image: url('/api/v1/avatar');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    color: transparent;
+}
 
 .message-content {
     max-width: 72%;
@@ -138,8 +148,8 @@ body {
 }
 
 .bot-message .message-content {
-    background: #f7f7f7;
-    border: 1px solid #ececec;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
     color: #1f2937;
     border-bottom-left-radius: 6px;
 }
@@ -162,18 +172,37 @@ body {
 }
 
 /* Typing indicator */
-.typing-indicator { display: flex; gap: 6px; padding: 10px 0; }
-.typing-dot {
-    width: 9px; height: 9px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--red-1), var(--red-2));
-    animation: typing 1.3s infinite;
-    box-shadow: 0 2px 6px rgba(225, 29, 72, 0.35);
+.typing-indicator { 
+    display: flex; 
+    gap: 2px; 
+    padding: 10px 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-weight: 600;
+    font-size: 16px;
 }
-.typing-dot:nth-child(2) { animation-delay: 0.15s; }
-.typing-dot:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typing {
-    0%, 60%, 100% { transform: translateY(0) scale(1); opacity: 0.6; }
-    30% { transform: translateY(-12px) scale(1.08); opacity: 1; }
+.typing-letter {
+    color: transparent;
+    background: linear-gradient(135deg, var(--red-1), var(--red-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: letterFade 2.1s infinite;
+    opacity: 0;
+}
+/* 7个字母依次显示 */
+.typing-letter:nth-child(1) { animation-delay: 0s; }
+.typing-letter:nth-child(2) { animation-delay: 0.15s; }
+.typing-letter:nth-child(3) { animation-delay: 0.3s; }
+.typing-letter:nth-child(4) { animation-delay: 0.45s; }
+.typing-letter:nth-child(5) { animation-delay: 0.6s; }
+.typing-letter:nth-child(6) { animation-delay: 0.75s; }
+.typing-letter:nth-child(7) { animation-delay: 0.9s; }
+
+@keyframes letterFade {
+    0% { opacity: 0; transform: translateY(5px); }
+    14% { opacity: 1; transform: translateY(0); }
+    85% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-5px); }
 }
 
 /* Input area */
@@ -207,7 +236,7 @@ body {
     min-height: 56px;
     max-height: 280px;
     padding: 12px 16px;
-    border: 1px solid transparent;
+    border: 1px solid #e5e7eb;
     border-radius: 12px;
     font-size: 16px;
     resize: none;
@@ -221,8 +250,8 @@ body {
 
 #messageInput:focus {
     outline: none;
-    border-color: rgba(225, 29, 72, 0.5);
-    box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.12);
+    border-color: rgba(255, 0, 15, 0.5);
+    box-shadow: 0 0 0 4px rgba(255, 0, 15, 0.12);
     background: #ffffff;
 }
 
@@ -236,7 +265,6 @@ body {
     color: #ffffff;
     cursor: pointer;
     transition: all 0.25s ease;
-    box-shadow: 0 12px 22px rgba(225, 29, 72, 0.35);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -258,7 +286,6 @@ body {
 
 .send-btn:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 16px 28px rgba(225, 29, 72, 0.45);
 }
 
 .send-btn:hover:not(:disabled)::before { left: 120%; }
@@ -299,7 +326,7 @@ body {
 }
 
 .status-dot.connecting { background: #f59e0b; box-shadow: 0 0 10px rgba(245, 158, 11, 0.6); }
-.status-dot.error { background: #dc2626; box-shadow: 0 0 10px rgba(220, 38, 38, 0.6); }
+.status-dot.error { background: #FF000F; box-shadow: 0 0 10px rgba(255, 0, 15, 0.6); }
 
 /* Scrollbar */
 .chat-messages::-webkit-scrollbar { width: 10px; }
@@ -320,43 +347,70 @@ body {
     .send-btn { width: 100%; height: 52px; }
 }
 
-/* MES Table Styles */
+/* Enhanced MES Table Styles */
 .mes-table {
     width: 100%;
     border-collapse: collapse;
-    margin: 10px 0;
+    margin: 16px 0;
     background: #ffffff;
-    border-radius: 8px;
+    border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.1);
     font-size: 14px;
+    border: 1px solid #e5e7eb;
 }
 
 .mes-table thead {
     background: linear-gradient(120deg, var(--red-1) 0%, var(--red-2) 100%);
     color: #ffffff;
+    position: relative;
+}
+
+.mes-table thead::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.1), transparent 60%);
+    pointer-events: none;
 }
 
 .mes-table th {
-    padding: 12px 16px;
+    padding: 14px 18px;
     text-align: left;
     font-weight: 600;
     letter-spacing: 0.3px;
+    position: relative;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .mes-table td {
-    padding: 10px 16px;
-    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 18px;
+    border-bottom: 1px solid #f3f4f6;
     color: var(--gray-4);
+    transition: background-color 0.2s ease;
+}
+
+.mes-table tbody tr {
+    transition: all 0.2s ease;
 }
 
 .mes-table tbody tr:hover {
-    background: #f9fafb;
-    transition: background 0.2s ease;
+    background: linear-gradient(90deg, #fef2f2, #ffffff);
+    transform: translateX(2px);
+    box-shadow: inset 3px 0 0 var(--red-1);
 }
 
 .mes-table tbody tr:last-child td {
     border-bottom: none;
+}
+
+/* Alternating row colors */
+.mes-table tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.mes-table tbody tr:nth-child(even):hover {
+    background: linear-gradient(90deg, #fef2f2, #fafafa);
 }
 
 /* Markdown content styles */
@@ -421,5 +475,169 @@ body {
 
 .message-content details ul {
     margin-top: 8px;
+}
+
+/* Modern Markdown-body styles */
+.markdown-body {
+    color: #1f2937;
+    line-height: 1.7;
+    font-size: 15px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+/* User message markdown-body should have white text */
+.user-message .markdown-body {
+    color: #ffffff;
+}
+
+.user-message .markdown-body p,
+.user-message .markdown-body strong,
+.user-message .markdown-body em,
+.user-message .markdown-body h1,
+.user-message .markdown-body h2,
+.user-message .markdown-body h3 {
+    color: #ffffff !important;
+}
+
+/* Code blocks */
+.markdown-body pre {
+    background: #f8fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0;
+    overflow-x: auto;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.markdown-body pre code {
+    background: transparent;
+    border: none;
+    color: #475569;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+}
+
+.markdown-body code.inline-code {
+    background: #fef2f2;
+    color: #FF000F;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    border: 1px solid #fecaca;
+}
+
+/* Blockquotes */
+.markdown-body blockquote {
+    margin: 12px 0;
+    padding: 12px 16px;
+    border-left: 4px solid var(--red-1);
+    background: #fef2f2;
+    color: #FF000F;
+    border-radius: 0 6px 6px 0;
+    font-style: italic;
+}
+
+/* Headers */
+.markdown-body h1.markdown-h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--red-2);
+    margin: 20px 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #fee2e2;
+}
+
+.markdown-body h2.markdown-h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--red-2);
+    margin: 18px 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #fecaca;
+}
+
+.markdown-body h3.markdown-h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--red-3);
+    margin: 16px 0 8px 0;
+}
+
+/* Enhanced lists */
+.markdown-body ol {
+    margin: 12px 0;
+    padding-left: 0;
+    counter-reset: list-counter;
+}
+
+.markdown-body ol li {
+    position: relative;
+    padding: 6px 0 6px 32px;
+    counter-increment: list-counter;
+    list-style: none;
+}
+
+.markdown-body ol li:before {
+    content: counter(list-counter);
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, var(--red-1), var(--red-2));
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.markdown-body ul {
+    margin: 12px 0;
+    padding-left: 0;
+    list-style: none;
+}
+
+.markdown-body ul li {
+    padding: 6px 0 6px 24px;
+    position: relative;
+}
+
+.markdown-body ul li:before {
+    content: "•";
+    color: var(--red-1);
+    font-weight: bold;
+    position: absolute;
+    left: 8px;
+    font-size: 16px;
+}
+
+/* Spacing improvements */
+.markdown-body p {
+    margin: 0 0 12px 0;
+}
+
+.markdown-body p:last-child {
+    margin-bottom: 0;
+}
+
+/* Emphasis */
+.markdown-body strong {
+    color: var(--red-2);
+    font-weight: 600;
+}
+
+.markdown-body em {
+    color: #6b7280;
+    font-style: italic;
 }
 

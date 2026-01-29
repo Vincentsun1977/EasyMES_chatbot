@@ -192,23 +192,19 @@ class DifyClient:
         Returns:
             API response as dictionary
         """
-        # Dify workflow API uses inputs to pass the query
-        # Note: The input parameter name should match your workflow definition
-        workflow_inputs = inputs or {}
-        if query:
-            workflow_inputs["input"] = query  # Changed from "query" to "input"
-        
         payload = {
-            "inputs": workflow_inputs,
+            "inputs": inputs or {},
+            "query": query,
             "response_mode": "blocking",
+            "conversation_id": conversation_id or "",
             "user": user
         }
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                logger.info(f"Sending request to Dify: {json.dumps(payload, ensure_ascii=False)}")
+                logger.info(f"Sending chat message to Dify: {json.dumps(payload, ensure_ascii=False)}")
                 response = await client.post(
-                    f"{self.api_url}/workflows/run",
+                    f"{self.api_url}/chat-messages",
                     headers=self.headers,
                     json=payload
                 )
@@ -241,24 +237,24 @@ class DifyClient:
         Yields:
             Streaming response chunks
         """
-        # Dify workflow API uses inputs to pass the query
-        # Note: The input parameter name should match your workflow definition
-        workflow_inputs = inputs or {}
-        if query:
-            workflow_inputs["input"] = query  # Changed from "query" to "input"
-        
         payload = {
-            "inputs": workflow_inputs,
+            "inputs": inputs or {},
+            "query": query,
             "response_mode": "streaming",
+            "conversation_id": conversation_id or "",
             "user": user
         }
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
-                logger.info(f"Streaming request to Dify: {json.dumps(payload, ensure_ascii=False)}")
+                logger.info(f"=== DIFY STREAMING REQUEST ===")
+                logger.info(f"URL: {self.api_url}/chat-messages")
+                logger.info(f"Headers: {json.dumps(dict(self.headers), ensure_ascii=False)}")
+                logger.info(f"Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+                
                 async with client.stream(
                     "POST",
-                    f"{self.api_url}/workflows/run",
+                    f"{self.api_url}/chat-messages",
                     headers=self.headers,
                     json=payload
                 ) as response:
@@ -280,7 +276,9 @@ class DifyClient:
                         
                         raise Exception(f"Dify API error: {response.status_code} - {error_text}")
                     
-                    # response.raise_for_status()
+                    # Track if this is a workflow app (receives workflow_finished event)
+                    is_workflow_app = False
+                    received_message_event = False
                     
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
@@ -288,43 +286,66 @@ class DifyClient:
                             if data.strip():
                                 try:
                                     event_json = json.loads(data)
-                                    # Only yield when event is workflow_finished
-                                    if event_json.get("event") == "workflow_finished":
-                                        # 格式化输出结果
-                                        if event_json.get("data") and event_json["data"].get("outputs"):
-                                            outputs = event_json["data"]["outputs"]
-                                            logger.info(f"Outputs keys: {list(outputs.keys())}")
-                                            logger.info(f"Outputs content: {json.dumps(outputs, ensure_ascii=False)[:300]}")
-                                            
-                                            # 尝试所有可能的字段名
-                                            raw_result = (outputs.get("text") or outputs.get("result") or 
-                                                        outputs.get("output") or outputs.get("mes_result") or
-                                                        outputs.get("answer"))
-                                            
-                                            # 如果没有找到常见字段，尝试获取第一个字段的值
-                                            if not raw_result and outputs:
-                                                first_key = list(outputs.keys())[0]
-                                                raw_result = outputs[first_key]
-                                                logger.info(f"Using first key '{first_key}' with value: {str(raw_result)[:200]}")
-                                            
-                                            if raw_result:
-                                                logger.info(f"Raw result type: {type(raw_result)}, value: {str(raw_result)[:200]}")
-                                                # 格式化结果
-                                                formatted_result = format_mes_result(str(raw_result))
-                                                logger.info(f"Formatted result: {formatted_result[:200]}")
-                                                # 重新构造事件数据，替换为格式化后的结果
-                                                event_json["data"]["outputs"]["text"] = formatted_result
-                                                event_json["data"]["outputs"]["result"] = formatted_result
-                                                event_json["data"]["outputs"]["output"] = formatted_result
-                                                formatted_data = json.dumps(event_json, ensure_ascii=False)
-                                                logger.info(f"Yielding formatted data")
-                                                yield formatted_data
-                                            else:
-                                                logger.info(f"No result found in outputs, yielding original")
-                                                yield data
-                                        else:
-                                            logger.info(f"No outputs in data, yielding original")
-                                            yield data
+                                    event_type = event_json.get("event")
+                                    
+                                    logger.info(f"=== STREAMING EVENT ===")
+                                    logger.info(f"Event Type: {event_type}")
+                                    logger.info(f"Raw Data: {data}")
+                                    logger.info(f"Parsed JSON: {json.dumps(event_json, ensure_ascii=False, indent=2)}")
+                                    
+                                    # Handle different chat message events
+                                    if event_type == "message":
+                                        # Full message event - contains complete answer
+                                        logger.info(f"Message event with answer: '{event_json.get('answer', '')[:100]}'")
+                                        yield data
+                                    elif event_type == "message_end":
+                                        # End of message - save conversation_id
+                                        logger.info(f"Message end event with conversation_id: {event_json.get('conversation_id', '')}")
+                                        yield data
+                                    elif event_type == "agent_message" or event_type == "text_chunk":
+                                        # Streaming text chunks
+                                        logger.info(f"Streaming event {event_type}: {json.dumps(event_json.get('data', {}), ensure_ascii=False)[:200]}")
+                                        yield data
+                                    elif event_type == "workflow_finished":
+                                        # Workflow finished - contains final answer in outputs
+                                        # Mark this as a workflow app
+                                        is_workflow_app = True
+                                        answer = event_json.get('data', {}).get('outputs', {}).get('answer', '')
+                                        logger.info(f"Workflow finished detected - this is a workflow app. Skipping stored message event.")
+                                        logger.info(f"Workflow finished with answer: {answer[:200]}")
+                                        yield data
+                                    elif event_type == "node_finished":
+                                        # Node finished - for workflow apps, don't send to frontend
+                                        # Only workflow_finished should be sent to avoid duplicate display
+                                        node_data = event_json.get('data', {})
+                                        node_type = node_data.get('node_type', '')
+                                        logger.info(f"Node finished ({node_type}) - not sent to frontend (waiting for workflow_finished)")
+                                        pass
+                                    elif event_type == "agent_thought":
+                                        # Agent reasoning - log only, don't yield to frontend
+                                        logger.info(f"Agent thought (not sent to frontend): {json.dumps(event_json.get('thought', ''), ensure_ascii=False)[:200]}")
+                                        pass
+                                    elif event_type == "message_file":
+                                        # File attachments
+                                        logger.info(f"Message file: {json.dumps(event_json.get('file', {}), ensure_ascii=False)}")
+                                        yield data
+                                    elif event_type == "workflow_started":
+                                        # Workflow started - log only, don't show to user
+                                        logger.info(f"Workflow started (not sent to frontend)")
+                                        pass
+                                    elif event_type == "node_started":
+                                        # Node started - log only, don't show to user
+                                        logger.info(f"Node started (not sent to frontend)")
+                                        pass
+                                    elif event_type == "ping":
+                                        # Ping event - keep connection alive, don't show to user
+                                        logger.debug(f"Ping event received")
+                                        pass
+                                    else:
+                                        # Log unknown events but don't yield (avoid showing unexpected data)
+                                        logger.warning(f"Unknown event type (not sent to frontend): {event_type}")
+                                        pass
+                                        
                                 except Exception as e:
                                     logger.warning(f"Failed to parse event json: {e}, raw: {data}")
             except httpx.HTTPStatusError as e:

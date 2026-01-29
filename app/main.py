@@ -2,23 +2,39 @@
 import sys
 import os
 import logging
+import pathlib
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.api import chat, health
+from app.api import chat, health, avatar
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO if not settings.APP_DEBUG else logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,  # Always use INFO level for detailed logging
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+    ]
 )
 
+# Set specific loggers to INFO level for detailed API logging
+logging.getLogger('app.services.dify_client').setLevel(logging.INFO)
+logging.getLogger('app.api.chat').setLevel(logging.INFO)
+logging.getLogger('httpx').setLevel(logging.WARNING)  # Reduce httpx noise
+
 logger = logging.getLogger(__name__)
+
+# Static files configuration
+static_dir = pathlib.Path(__file__).parent / "static"
+logger.info(f"Static directory: {static_dir}")
+logger.info(f"Static directory exists: {static_dir.exists()}")
+if static_dir.exists():
+    logger.info(f"Static files: {list(static_dir.glob('*'))}")
 
 # Create FastAPI app
 app = FastAPI(
@@ -38,18 +54,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files BEFORE API routes
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 # Include API routers
 app.include_router(health.router, tags=["Health"])
 app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
-
-# Mount static files
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.include_router(avatar.router, prefix="/api/v1", tags=["Avatar"])
 
 
 @app.get("/")
 async def root():
     """Serve the chatbot UI."""
-    return FileResponse("app/static/index.html")
+    logger.info("=== HOME PAGE ACCESSED ===")
+    return FileResponse(str(static_dir / "index.html"))
+
+
+@app.get("/test-static")
+async def test_static():
+    """Test static file access."""
+    css_file = static_dir / "chat.css"
+    logger.info(f"Testing CSS file: {css_file}")
+    logger.info(f"CSS file exists: {css_file.exists()}")
+    if css_file.exists():
+        with open(css_file, 'r', encoding='utf-8') as f:
+            content = f.read()[:200]
+            return {"status": "ok", "file": str(css_file), "content_preview": content}
+    return {"status": "error", "file": str(css_file)}
+
+
+@app.get("/static-debug/{filename}")
+async def static_debug(filename: str):
+    """Debug static file serving."""
+    file_path = static_dir / filename
+    logger.info(f"Serving static file: {file_path}")
+    if file_path.exists():
+        return FileResponse(str(file_path))
+    return {"error": "File not found", "path": str(file_path)}
 
 
 @app.on_event("startup")
