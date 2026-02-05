@@ -7,8 +7,9 @@ class Settings(BaseSettings):
     """Application settings from environment variables."""
     
     # Dify API Configuration
-    DIFY_API_URL: str = "http://test.nas-save.abb.com/v1"
+    DIFY_API_URL: str = "https://test.nas-save.abb.com/v1"
     DIFY_API_KEY: str
+    VERIFY_SSL: bool = False  # Set to False to disable SSL verification for self-signed certificates
     
     # Application Configuration
     APP_HOST: str = "0.0.0.0"

@@ -212,7 +212,7 @@ GET /api/v1/conversations?user=user-123
 
 ```env
 # Dify API 配置
-DIFY_API_URL=http://test.nas-save.abb.com/v1
+DIFY_API_URL=https://test.nas-save.abb.com/v1
 DIFY_API_KEY=app-Y3ScvBwBtTIujre0tyAj6aQg
 
 # 应用配置
@@ -283,7 +283,7 @@ curl http://localhost:8000/health
 {
   "status": "healthy",
   "timestamp": "2026-01-16T12:00:00",
-  "dify_api_url": "http://test.nas-save.abb.com/v1"
+  "dify_api_url": "https://test.nas-save.abb.com/v1"
 }
 ```
 

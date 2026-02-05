@@ -40,7 +40,77 @@ class ChatBot {
             }
         });
         
+        // 移动端虚拟键盘处理
+        this.handleMobileKeyboard();
+        
+        // 移动端触摸优化
+        this.setupTouchOptimizations();
+        
         console.log('ChatBot initialized');
+    }
+    
+    // 移动端虚拟键盘处理
+    handleMobileKeyboard() {
+        // 检测是否为移动设备
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (!isMobile) return;
+        
+        // 虚拟键盘弹出时，调整视图
+        this.messageInput.addEventListener('focus', () => {
+            setTimeout(() => {
+                this.scrollToBottom();
+                // 在iOS上防止页面缩放
+                if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                    document.body.style.position = 'fixed';
+                    document.body.style.width = '100%';
+                }
+            }, 300);
+        });
+        
+        // 虚拟键盘隐藏时，恢复视图
+        this.messageInput.addEventListener('blur', () => {
+            if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                document.body.style.position = '';
+                document.body.style.width = '';
+            }
+        });
+        
+        // 监听视口大小变化（虚拟键盘弹出/隐藏）
+        let lastHeight = window.innerHeight;
+        window.addEventListener('resize', () => {
+            const currentHeight = window.innerHeight;
+            if (currentHeight < lastHeight) {
+                // 虚拟键盘弹出
+                setTimeout(() => this.scrollToBottom(), 100);
+            }
+            lastHeight = currentHeight;
+        });
+    }
+    
+    // 移动端触摸优化
+    setupTouchOptimizations() {
+        // 阻止双击缩放
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 300) {
+                e.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+        
+        // 优化滚动性能
+        this.chatMessages.style.webkitOverflowScrolling = 'touch';
+        
+        // 为按钮添加触摸反馈
+        [this.sendBtn, this.clearBtn].forEach(btn => {
+            btn.addEventListener('touchstart', () => {
+                btn.style.opacity = '0.7';
+            });
+            btn.addEventListener('touchend', () => {
+                btn.style.opacity = '1';
+            });
+        });
     }
     
     handleSendButtonClick(e) {
@@ -149,8 +219,8 @@ class ChatBot {
         // 转换斜体文本 *text*
         html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
         
-        // 转换有序列表 1. text
-        html = html.replace(/^\d+\. (.+)$/gm, '<li class="ordered">$1</li>');
+        // 转换有序列表 1. text (必须是行首，且点后有空格)
+        html = html.replace(/^(\d+)\.\s+(.+)$/gm, '<li class="ordered">$2</li>');
         if (html.includes('<li class="ordered">')) {
             html = html.replace(/(<li class="ordered">.*<\/li>\n?)+/g, (match) => `<ol>${match.replace(/ class="ordered"/g, '')}</ol>`);
         }
@@ -186,19 +256,28 @@ class ChatBot {
     
     // 格式化MES数据输出
     formatMesData(data) {
+        console.log('[formatMesData] Input:', data);
+        console.log('[formatMesData] Input type:', typeof data);
+        
         // 如果是字符串，尝试解析JSON
         if (typeof data === 'string') {
             try {
                 // 检查是否是JSON格式
                 if (data.trim().startsWith('{') && data.trim().endsWith('}')) {
                     const parsed = JSON.parse(data);
+                    console.log('[formatMesData] Parsed JSON:', parsed);
                     return this.formatMesData(parsed);
                 }
                 // 否则直接处理字符串
-                return this.cleanUpText(data);
+                const cleaned = this.cleanUpText(data);
+                console.log('[formatMesData] Cleaned text:', cleaned);
+                return cleaned;
             } catch (e) {
                 // 不是有效的JSON，按普通字符串处理
-                return this.cleanUpText(data);
+                console.log('[formatMesData] Parse error, treating as plain text');
+                const cleaned = this.cleanUpText(data);
+                console.log('[formatMesData] Cleaned text:', cleaned);
+                return cleaned;
             }
         }
         
@@ -236,12 +315,18 @@ class ChatBot {
     cleanUpText(text) {
         if (!text) return '';
         
-        return text
+        console.log('[cleanUpText] Input:', text);
+        
+        const result = text
             .replace(/^[\n\s]+|[\n\s]+$/g, '') // 去除首尾空白
             .replace(/\\n/g, '\n') // 处理转义的换行符
             .replace(/\n{3,}/g, '\n\n') // 合并多个连续换行
-            .replace(/\n?\d{13,}\.text\s*$/g, '') // 去除末尾的异常节点ID（如 1769587035275.text）
+            // 修正正则：只匹配真正的异常节点ID（换行符后跟13位以上的纯数字，然后是.text）
+            .replace(/\n\d{13,}\.text\s*$/g, '') // 去除末尾的异常节点ID（如 \n1769587035275.text）
             .trim();
+        
+        console.log('[cleanUpText] Output:', result);
+        return result;
     }
     
     autoResize() {
@@ -346,17 +431,22 @@ class ChatBot {
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         const data = line.slice(6).trim();
+                        console.log('[RAW DATA LINE]', data);
                         if (data) {
                             try {
                                 const json = JSON.parse(data);
                                 console.log('=== Received event:', json.event, '===');
+                                console.log('[FULL JSON]', JSON.stringify(json, null, 2));
                                 
                                 // Handle chat message events
                                 if (json.event === 'message') {
                                     console.log('[MESSAGE EVENT] Processing...');
                                     // Get the answer from message data
                                     const answer = json.answer || '';
-                                    console.log('[MESSAGE EVENT] Answer length:', answer.length);
+                                    console.log('[MESSAGE EVENT] Raw answer TYPE:', typeof answer);
+                                    console.log('[MESSAGE EVENT] Raw answer LENGTH:', answer.length);
+                                    console.log('[MESSAGE EVENT] Raw answer VALUE:', answer);
+                                    console.log('[MESSAGE EVENT] Raw answer CHAR CODES:', Array.from(answer).map((c, i) => `${i}:${c}(${c.charCodeAt(0)})`).join(' '));
                                     
                                     // Only process if answer is not empty (ignore empty message events from workflow apps)
                                     if (answer) {
@@ -374,14 +464,19 @@ class ChatBot {
                                         }
                                         
                                         if (contentDiv) {
-                                            fullAnswer = this.formatMesData(answer);
+                                            // 累加答案内容（流式传输）
+                                            fullAnswer += answer;
+                                            console.log('[MESSAGE EVENT] Accumulated answer length:', fullAnswer.length);
+                                            
+                                            // 格式化累加后的完整答案
+                                            const formattedAnswer = this.formatMesData(fullAnswer);
                                             
                                             // 使用 Markdown 渲染
                                             const markdownContainer = contentDiv.querySelector('.markdown-body p') || contentDiv.querySelector('p');
                                             if (markdownContainer) {
-                                                markdownContainer.innerHTML = this.markdownToHtml(fullAnswer);
+                                                markdownContainer.innerHTML = this.markdownToHtml(formattedAnswer);
                                             } else {
-                                                contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(fullAnswer)}</p></div>`;
+                                                contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(formattedAnswer)}</p></div>`;
                                             }
                                             this.scrollToBottom();
                                         }
@@ -480,6 +575,9 @@ class ChatBot {
                 }
             } else {
                 console.log('[LOOP END] Content received, no error message needed');
+                
+                // 添加免责声明到最新的机器人消息
+                this.addDisclaimerToLatestBotMessage();
             }
             
         } catch (error) {
@@ -505,6 +603,7 @@ class ChatBot {
                     );
                     this.chatMessages.appendChild(stopMessage);
                     this.scrollToBottom();
+                    this.addDisclaimerToLatestBotMessage();
                 }
             } else {
                 console.error('Stream error:', error);
@@ -528,6 +627,7 @@ class ChatBot {
                 if (contentDiv) {
                     contentDiv.textContent = `抱歉，发生了错误：${error.message}`;
                 }
+                this.addDisclaimerToLatestBotMessage();
             }
         } finally {
             this.isStreaming = false;
@@ -537,6 +637,12 @@ class ChatBot {
     }
     
     addMessage(content, type) {
+        // 如果是机器人消息，先移除所有之前的免责声明
+        if (type === 'bot') {
+            const oldDisclaimers = this.chatMessages.querySelectorAll('.message-disclaimer');
+            oldDisclaimers.forEach(disclaimer => disclaimer.remove());
+        }
+        
         const messageId = 'msg_' + Date.now();
         const messageDiv = this.createMessageElement(content, type, messageId);
         this.chatMessages.appendChild(messageDiv);
@@ -573,6 +679,15 @@ class ChatBot {
         
         markdownBody.appendChild(p);
         contentDiv.appendChild(markdownBody);
+        
+        // 为机器人消息添加免责声明
+        if (type === 'bot') {
+            const disclaimer = document.createElement('div');
+            disclaimer.className = 'message-disclaimer';
+            disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
+            disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
+            contentDiv.appendChild(disclaimer);
+        }
         
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(contentDiv);
@@ -628,6 +743,27 @@ class ChatBot {
     
     scrollToBottom() {
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+    
+    addDisclaimerToLatestBotMessage() {
+        // 先移除所有现有的免责声明
+        const oldDisclaimers = this.chatMessages.querySelectorAll('.message-disclaimer');
+        oldDisclaimers.forEach(disclaimer => disclaimer.remove());
+        
+        // 找到最后一条机器人消息
+        const botMessages = this.chatMessages.querySelectorAll('.bot-message');
+        if (botMessages.length > 0) {
+            const latestBotMessage = botMessages[botMessages.length - 1];
+            const contentDiv = latestBotMessage.querySelector('.message-content');
+            
+            if (contentDiv && !contentDiv.querySelector('.message-disclaimer')) {
+                const disclaimer = document.createElement('div');
+                disclaimer.className = 'message-disclaimer';
+                disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
+                disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
+                contentDiv.appendChild(disclaimer);
+            }
+        }
     }
     
     setInputState(enabled) {

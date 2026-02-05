@@ -200,7 +200,7 @@ class DifyClient:
             "user": user
         }
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, verify=settings.VERIFY_SSL) as client:
             try:
                 logger.info(f"Sending chat message to Dify: {json.dumps(payload, ensure_ascii=False)}")
                 response = await client.post(
@@ -245,7 +245,7 @@ class DifyClient:
             "user": user
         }
         
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, verify=settings.VERIFY_SSL) as client:
             try:
                 logger.info(f"=== DIFY STREAMING REQUEST ===")
                 logger.info(f"URL: {self.api_url}/chat-messages")

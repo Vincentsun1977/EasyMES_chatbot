@@ -46,10 +46,11 @@ body {
     align-items: center;
     padding: 18px 22px;
     background: url('/static-debug/chatbot.png') no-repeat center center;
-    background-size: 100%;
+    background-size: cover;
     color: #ffffff;
     position: relative;
     text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+    flex-shrink: 0;
 }
 
 .chat-header::after {
@@ -62,25 +63,38 @@ body {
 }
 
 .chat-header h2 {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 800;
     letter-spacing: 0.4px;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .header-actions {
     display: flex;
     gap: 10px;
+    flex-shrink: 0;
 }
 
 .btn-icon {
-    background: transparent; /* Removed background color */
-    border: none; /* Removed border */
+    background: transparent;
+    border: none;
     border-radius: 10px;
-    padding: 9px;
+    padding: 8px;
     cursor: pointer;
     color: #ffffff;
     transition: all 0.25s ease;
     backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    flex-shrink: 0;
 }
 
 .btn-icon:hover {
@@ -118,7 +132,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 800;
     flex-shrink: 0;
 }
@@ -178,7 +192,7 @@ body {
     padding: 10px 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-weight: 600;
-    font-size: 16px;
+    font-size: 12px;
 }
 .typing-letter {
     color: transparent;
@@ -213,17 +227,6 @@ body {
     box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.06);
 }
 
-.input-shell {
-    display: flex;
-    gap: 12px;
-    align-items: flex-end;
-    background: #fafafa;
-    border: 1.5px solid #e5e7eb;
-    border-radius: 16px;
-    padding: 12px 14px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 10px 30px rgba(0, 0, 0, 0.05);
-}
-
 #chatForm { 
     display: flex;
     align-items: flex-end;
@@ -242,10 +245,9 @@ body {
     resize: none;
     font-family: inherit;
     transition: all 0.25s ease;
-    background: transparent;
+    background: #ffffff;
     color: var(--gray-4);
     line-height: 1.65;
-    width: 100%;
 }
 
 #messageInput:focus {
@@ -265,11 +267,13 @@ body {
     color: #ffffff;
     cursor: pointer;
     transition: all 0.25s ease;
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
     width: 52px;
     height: 52px;
+    min-width: 52px;
+    min-height: 52px;
     flex-shrink: 0;
     position: relative;
     overflow: hidden;
@@ -339,12 +343,340 @@ body {
     background: linear-gradient(135deg, var(--red-2), var(--red-3));
 }
 
-/* Responsive */
+/* ============================================
+   响应式设计 - 移动端、平板和桌面端适配
+   ============================================ */
+
+/* 平板端 (iPad) - 768px to 1024px */
+@media (max-width: 1024px) and (min-width: 769px) {
+    .chat-container {
+        max-width: 100%;
+        margin: 0;
+        border-radius: 0;
+    }
+    
+    .chat-header {
+        padding: 16px 20px;
+    }
+    
+    .chat-header h2 {
+        font-size: 18px;
+    }
+    
+    .chat-messages {
+        padding: 20px;
+    }
+    
+    .message-content {
+        max-width: 75%;
+        font-size: 15px;
+    }
+    
+    .message-avatar {
+        width: 38px;
+        height: 38px;
+        font-size: 13px;
+    }
+}
+
+/* 移动端 - 小于 768px */
 @media (max-width: 768px) {
-    .chat-container { border-radius: 0; box-shadow: none; }
-    .message-content { max-width: 90%; }
-    .input-shell { flex-direction: column; }
-    .send-btn { width: 100%; height: 52px; }
+    body {
+        background: #ffffff; /* 移动端使用纯白背景 */
+    }
+    
+    .chat-container { 
+        border-radius: 0; 
+        box-shadow: none;
+        max-width: 100%;
+    }
+    
+    /* 头部优化 */
+    .chat-header {
+        padding: 12px 16px;
+        background-size: cover;
+        min-height: 56px;
+    }
+    
+    .chat-header h2 {
+        font-size: 16px;
+        letter-spacing: 0.2px;
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .header-actions {
+        gap: 8px;
+    }
+    
+    .btn-icon {
+        width: 32px;
+        height: 32px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 6px;
+        border-radius: 8px;
+    }
+    
+    .btn-icon svg {
+        width: 18px;
+        height: 18px;
+    }
+    
+    /* 消息区域优化 */
+    .chat-messages {
+        padding: 16px 12px 20px;
+        gap: 14px;
+    }
+    
+    .message {
+        gap: 10px;
+    }
+    
+    .message-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 11px;
+        border-radius: 10px;
+    }
+    
+    .message-content { 
+        max-width: 85%;
+        padding: 10px 14px;
+        font-size: 14px;
+        line-height: 1.6;
+        border-radius: 14px;
+    }
+    
+    .bot-message .message-content {
+        border-bottom-left-radius: 4px;
+    }
+    
+    .user-message .message-content {
+        border-bottom-right-radius: 4px;
+    }
+    
+    /* Markdown 内容在移动端的优化 */
+    .markdown-body {
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    
+    .markdown-body h1.markdown-h1 {
+        font-size: 18px;
+        margin: 14px 0 8px 0;
+    }
+    
+    .markdown-body h2.markdown-h2 {
+        font-size: 16px;
+        margin: 12px 0 6px 0;
+    }
+    
+    .markdown-body h3.markdown-h3 {
+        font-size: 15px;
+        margin: 10px 0 6px 0;
+    }
+    
+    .markdown-body pre {
+        padding: 12px;
+        font-size: 12px;
+        margin: 10px 0;
+        overflow-x: auto;
+        max-width: 100%;
+    }
+    
+    .markdown-body code.inline-code {
+        font-size: 12px;
+        padding: 1px 4px;
+    }
+    
+    .markdown-body ol li,
+    .markdown-body ul li {
+        font-size: 14px;
+        padding: 4px 0 4px 28px;
+    }
+    
+    /* 表格在移动端的优化 */
+    .mes-table {
+        font-size: 12px;
+        margin: 12px 0;
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .mes-table thead,
+    .mes-table tbody,
+    .mes-table tr {
+        display: table;
+        width: 100%;
+        table-layout: fixed;
+    }
+    
+    .mes-table th,
+    .mes-table td {
+        padding: 8px 10px;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    /* 输入区域优化 */
+    .chat-input-container {
+        padding: 12px !important;
+        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.04) !important;
+        flex-shrink: 0 !important;
+    }
+    
+    #chatForm {
+        display: flex !important;
+        gap: 10px !important;
+        align-items: flex-end !important;
+        width: 100% !important;
+        flex-direction: row !important;
+    }
+    
+    #messageInput {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        min-height: 44px !important;
+        max-height: 200px !important;
+        font-size: 16px !important; /* 防止iOS自动缩放 */
+        padding: 10px 14px !important;
+        border-radius: 10px !important;
+        box-sizing: border-box !important;
+        width: auto !important;
+    }
+    
+    .send-btn { 
+        flex: 0 0 auto !important;
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+        min-height: 44px !important;
+        border-radius: 12px !important;
+    }
+    
+    .send-btn svg {
+        width: 20px !important;
+        height: 20px !important;
+    }
+    
+    /* 打字指示器 */
+    .typing-indicator {
+        font-size: 14px;
+    }
+    
+    /* 连接状态 */
+    .connection-status {
+        bottom: 16px;
+        right: 16px;
+        font-size: 12px;
+        padding: 8px 14px;
+    }
+    
+    /* 滚动条优化（移动端） */
+    .chat-messages::-webkit-scrollbar {
+        width: 4px;
+    }
+    
+    .chat-messages::-webkit-scrollbar-thumb {
+        border-radius: 2px;
+    }
+}
+
+/* 超小屏幕 - 小于 480px */
+@media (max-width: 480px) {
+    .chat-header h2 {
+        font-size: 15px;
+    }
+    
+    .message-content {
+        max-width: 88%;
+        font-size: 13px;
+        padding: 9px 12px;
+    }
+    
+    .message-avatar {
+        width: 28px;
+        height: 28px;
+        font-size: 10px;
+    }
+    
+    .markdown-body {
+        font-size: 13px;
+    }
+    
+    .mes-table th,
+    .mes-table td {
+        padding: 6px 8px;
+        font-size: 11px;
+    }
+    
+    #messageInput {
+        font-size: 16px; /* 保持16px防止iOS缩放 */
+        min-height: 42px;
+        padding: 9px 12px;
+    }
+    
+    .send-btn {
+        width: 42px;
+        height: 42px;
+        min-width: 42px;
+        min-height: 42px;
+    }
+}
+
+/* 横屏模式优化 */
+@media (max-width: 768px) and (orientation: landscape) {
+    .chat-messages {
+        padding: 12px;
+    }
+    
+    .chat-input-container {
+        padding: 10px 12px;
+    }
+    
+    #messageInput {
+        max-height: 100px;
+    }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+    /* 增大可点击区域 */
+    .btn-icon {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    
+    .send-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    
+    /* 禁用悬停效果 */
+    .btn-icon:hover {
+        background: transparent;
+        transform: none;
+    }
+    
+    /* 点击反馈 */
+    .btn-icon:active {
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(0.95);
+    }
+    
+    .send-btn:active:not(:disabled) {
+        transform: scale(0.95);
+    }
+    
+    .mes-table tbody tr:hover {
+        background: inherit;
+        transform: none;
+        box-shadow: none;
+    }
 }
 
 /* Enhanced MES Table Styles */
