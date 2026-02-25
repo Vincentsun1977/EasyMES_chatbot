@@ -1,7 +1,7 @@
 """Chat API endpoints."""
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from app.models.schemas import ChatRequest, ChatResponse, ErrorResponse
+from app.models.schemas import ChatRequest, ChatResponse, ErrorResponse, ConversationDeleteRequest, MessageFeedbackRequest
 from app.services.dify_client import dify_client
 import json
 import logging
@@ -116,7 +116,7 @@ async def chat_websocket(websocket: WebSocket):
             
             query = request_data.get("query")
             conversation_id = request_data.get("conversation_id")
-            user = request_data.get("user", "default-user")
+            user = request_data.get("user", "CNHUSUN")
             inputs = request_data.get("inputs", {})
             
             if not query:
@@ -161,19 +161,132 @@ async def chat_websocket(websocket: WebSocket):
 
 
 @router.get("/conversations")
-async def get_conversations(user: str = "default-user"):
+async def get_conversations(
+    user: str = "CNHUSUN",
+    last_id: str = None,
+    limit: int = 20,
+    sort_by: str = "created_at"
+):
     """
     Get conversation history for a user.
     
     Args:
         user: User identifier
+        last_id: Optional last conversation ID for pagination
+        limit: Number of records to return (default 20, max 100)
+        sort_by: Sort field, default created_at (oldest first)
         
     Returns:
-        List of conversations
+        List of conversations with pagination info
     """
     try:
-        conversations = await dify_client.get_conversations(user=user)
+        logger.info(f"=== API: GET CONVERSATIONS ===")
+        logger.info(f"User: {user}, Limit: {limit}, Sort by: {sort_by}")
+        
+        conversations = await dify_client.get_conversations(
+            user=user,
+            last_id=last_id,
+            limit=limit,
+            sort_by=sort_by
+        )
+        
+        logger.info(f"=== API: RETURNING CONVERSATIONS ===")
+        logger.info(f"Total conversations: {len(conversations.get('data', []))}")
+        logger.info(f"Has more: {conversations.get('has_more', False)}")
+        
         return conversations
     except Exception as e:
         logger.error(f"Error getting conversations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str, user: str = "CNHUSUN"):
+    """
+    Get messages for a specific conversation.
+    
+    Args:
+        conversation_id: Conversation ID
+        user: User identifier
+        
+    Returns:
+        List of messages in the conversation
+    """
+    try:
+        logger.info(f"=== API: GET CONVERSATION MESSAGES ===")
+        logger.info(f"Conversation ID: {conversation_id}")
+        logger.info(f"User: {user}")
+        
+        messages = await dify_client.get_conversation_messages(
+            conversation_id=conversation_id,
+            user=user
+        )
+        
+        logger.info(f"=== API: RETURNING MESSAGES ===")
+        logger.info(f"Total messages: {len(messages.get('data', []))}")
+        logger.info(f"Has more: {messages.get('has_more', False)}")
+        logger.info(f"Full response: {json.dumps(messages, ensure_ascii=False, indent=2)}")
+        
+        return messages
+    except Exception as e:
+        logger.error(f"Error getting conversation messages: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, request: ConversationDeleteRequest):
+    """
+    Delete a specific conversation.
+
+    Args:
+        conversation_id: Conversation ID
+        request: Request body containing user identifier
+
+    Returns:
+        Delete result
+    """
+    try:
+        logger.info(f"=== API: DELETE CONVERSATION ===")
+        logger.info(f"Conversation ID: {conversation_id}")
+        logger.info(f"User: {request.user}")
+
+        await dify_client.delete_conversation(
+            conversation_id=conversation_id,
+            user=request.user
+        )
+
+        return {"result": "success"}
+    except Exception as e:
+        logger.error(f"Error deleting conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/messages/{message_id}/feedbacks")
+async def message_feedback(message_id: str, request: MessageFeedbackRequest):
+    """
+    Submit feedback for a specific message.
+
+    Args:
+        message_id: Message ID
+        request: Feedback request body
+
+    Returns:
+        Feedback result
+    """
+    try:
+        logger.info(f"=== API: MESSAGE FEEDBACK ===")
+        logger.info(f"Message ID: {message_id}")
+        logger.info(f"Rating: {request.rating}")
+        logger.info(f"User: {request.user}")
+
+        result = await dify_client.message_feedback(
+            message_id=message_id,
+            rating=request.rating,
+            user=request.user,
+            content=request.content
+        )
+
+        return result
+    except Exception as e:
+        logger.error(f"Error submitting message feedback: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

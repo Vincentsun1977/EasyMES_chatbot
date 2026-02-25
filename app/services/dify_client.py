@@ -176,7 +176,7 @@ class DifyClient:
     async def send_message(
         self,
         query: str,
-        user: str = "default-user",
+        user: str = "CNHUSUN",
         conversation_id: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -217,11 +217,90 @@ class DifyClient:
             except Exception as e:
                 logger.error(f"Failed to call Dify API: {str(e)}")
                 raise Exception(f"Failed to call Dify API: {str(e)}")
+
+    async def delete_conversation(
+        self,
+        conversation_id: str,
+        user: str = "CNHUSUN"
+    ) -> None:
+        """
+        Delete a conversation in Dify.
+
+        Args:
+            conversation_id: Conversation ID to delete
+            user: User identifier
+        """
+        payload = {
+            "user": user
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, verify=settings.VERIFY_SSL) as client:
+            try:
+                logger.info(f"Deleting conversation in Dify: conversation_id={conversation_id}, user={user}")
+                response = await client.request(
+                    "DELETE",
+                    f"{self.api_url}/conversations/{conversation_id}",
+                    headers=self.headers,
+                    json=payload
+                )
+
+                if response.status_code not in (200, 204):
+                    error_detail = response.text
+                    logger.error(f"Dify delete conversation error {response.status_code}: {error_detail}")
+                    raise Exception(f"Dify API error: {response.status_code} - {error_detail}")
+            except Exception as e:
+                logger.error(f"Failed to delete conversation in Dify: {str(e)}")
+                raise Exception(f"Failed to delete conversation in Dify: {str(e)}")
+
+    async def message_feedback(
+        self,
+        message_id: str,
+        rating: Optional[str] = "like",
+        user: str = "CNHUSUN",
+        content: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Submit message feedback to Dify.
+
+        Args:
+            message_id: Message ID
+            rating: like/dislike/null
+            user: User identifier
+            content: Feedback details
+
+        Returns:
+            API response
+        """
+        payload = {
+            "rating": rating,
+            "user": user,
+            "content": content
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, verify=settings.VERIFY_SSL) as client:
+            try:
+                logger.info(f"Submitting message feedback: message_id={message_id}, rating={rating}, user={user}")
+                response = await client.post(
+                    f"{self.api_url}/messages/{message_id}/feedbacks",
+                    headers=self.headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                if response.content:
+                    return response.json()
+                return {"result": "success"}
+            except httpx.HTTPStatusError as e:
+                error_detail = e.response.text
+                logger.error(f"Dify message feedback error {e.response.status_code}: {error_detail}")
+                raise Exception(f"Dify API error: {e.response.status_code} - {error_detail}")
+            except Exception as e:
+                logger.error(f"Failed to submit message feedback in Dify: {str(e)}")
+                raise Exception(f"Failed to submit message feedback in Dify: {str(e)}")
     
     async def stream_message(
         self,
         query: str,
-        user: str = "default-user",
+        user: str = "CNHUSUN",
         conversation_id: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[str, None]:
@@ -363,29 +442,115 @@ class DifyClient:
                     logger.error(f"Failed to stream from Dify API: {str(e)}")
                 raise Exception(f"Failed to stream from Dify API: {str(e)}")
     
-    async def get_conversations(self, user: str = "default-user") -> Dict[str, Any]:
+    async def get_conversations(
+        self, 
+        user: str = "CNHUSUN", 
+        last_id: Optional[str] = None,
+        limit: int = 20,
+        sort_by: str = "-updated_at"
+    ) -> Dict[str, Any]:
         """
         Get conversation history for a user.
         
         Args:
             user: User identifier
+            last_id: Optional last conversation ID for pagination
+            limit: Number of records to return (default 20, max 100)
+            sort_by: Sort field, default -updated_at (desc by updated time)
             
         Returns:
-            List of conversations
+            List of conversations with pagination info
         """
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        params = {
+            "user": user,
+            "limit": limit,
+            "sort_by": sort_by
+        }
+        if last_id:
+            params["last_id"] = last_id
+        
+        logger.info(f"=== GET CONVERSATIONS ===")
+        logger.info(f"Request URL: {self.api_url}/conversations")
+        logger.info(f"Request Params: {json.dumps(params, ensure_ascii=False)}")
+            
+        async with httpx.AsyncClient(timeout=30.0, verify=settings.VERIFY_SSL) as client:
             try:
                 response = await client.get(
                     f"{self.api_url}/conversations",
                     headers=self.headers,
-                    params={"user": user}
+                    params=params
                 )
                 response.raise_for_status()
-                return response.json()
+                result = response.json()
+                logger.info(f"=== CONVERSATIONS RESPONSE ===")
+                logger.info(f"Response Status: {response.status_code}")
+                logger.info(f"Full Response: {json.dumps(result, ensure_ascii=False, indent=2)}")
+                if 'data' in result:
+                    logger.info(f"Number of conversations: {len(result['data'])}")
+                    for idx, conv in enumerate(result['data']):
+                        logger.info(f"Conversation {idx + 1}:")
+                        logger.info(f"  - ID: {conv.get('id', 'N/A')}")
+                        logger.info(f"  - Name: {conv.get('name', 'N/A')}")
+                        logger.info(f"  - Status: {conv.get('status', 'N/A')}")
+                        logger.info(f"  - Created at: {conv.get('created_at', 'N/A')}")
+                        logger.info(f"  - Updated at: {conv.get('updated_at', 'N/A')}")
+                return result
             except httpx.HTTPStatusError as e:
+                logger.error(f"Dify API HTTP error: {e.response.status_code}")
+                logger.error(f"Error response: {e.response.text}")
                 raise Exception(f"Dify API error: {e.response.status_code} - {e.response.text}")
             except Exception as e:
+                logger.error(f"Failed to get conversations: {str(e)}")
                 raise Exception(f"Failed to get conversations: {str(e)}")
+    
+    async def get_conversation_messages(
+        self,
+        conversation_id: str,
+        user: str = "CNHUSUN"
+    ) -> Dict[str, Any]:
+        """
+        Get messages for a specific conversation.
+        
+        Args:
+            conversation_id: Conversation ID
+            user: User identifier
+            
+        Returns:
+            List of messages in the conversation
+        """
+        params = {"user": user}
+        logger.info(f"=== GET CONVERSATION MESSAGES ===")
+        logger.info(f"Conversation ID: {conversation_id}")
+        logger.info(f"User: {user}")
+        logger.info(f"Request URL: {self.api_url}/messages")
+        logger.info(f"Request Params: {json.dumps({**params, 'conversation_id': conversation_id}, ensure_ascii=False)}")
+            
+        async with httpx.AsyncClient(timeout=30.0, verify=settings.VERIFY_SSL) as client:
+            try:
+                response = await client.get(
+                    f"{self.api_url}/messages",
+                    headers=self.headers,
+                    params={**params, "conversation_id": conversation_id}
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(f"=== CONVERSATION MESSAGES RESPONSE ===")
+                logger.info(f"Response Status: {response.status_code}")
+                logger.info(f"Full Response: {json.dumps(result, ensure_ascii=False, indent=2)}")
+                if 'data' in result:
+                    logger.info(f"Number of messages: {len(result['data'])}")
+                    for idx, msg in enumerate(result['data']):
+                        logger.info(f"Message {idx + 1}:")
+                        logger.info(f"  - Query: {msg.get('query', 'N/A')}")
+                        logger.info(f"  - Answer: {msg.get('answer', 'N/A')[:200]}...")
+                        logger.info(f"  - Created at: {msg.get('created_at', 'N/A')}")
+                return result
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Dify API HTTP error: {e.response.status_code}")
+                logger.error(f"Error response: {e.response.text}")
+                raise Exception(f"Dify API error: {e.response.status_code} - {e.response.text}")
+            except Exception as e:
+                raise Exception(f"Failed to get conversation messages: {str(e)}")
 
 
 # Global client instance

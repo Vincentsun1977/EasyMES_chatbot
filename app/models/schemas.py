@@ -8,7 +8,7 @@ class ChatRequest(BaseModel):
     """Chat request model."""
     query: str = Field(..., description="User message", min_length=1)
     conversation_id: Optional[str] = Field(None, description="Conversation ID for continuing chat")
-    user: str = Field(default="default-user", description="User identifier")
+    user: str = Field(default="CNHUSUN", description="User identifier")
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Additional inputs")
 
 
@@ -18,6 +18,18 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(..., description="Conversation ID")
     message_id: str = Field(..., description="Message ID")
     created_at: Optional[int] = Field(None, description="Creation timestamp")
+
+
+class ConversationDeleteRequest(BaseModel):
+    """Conversation delete request model."""
+    user: str = Field(default="CNHUSUN", description="User identifier")
+
+
+class MessageFeedbackRequest(BaseModel):
+    """Message feedback request model."""
+    rating: Optional[str] = Field(default="like", description="Feedback rating: like/dislike/null")
+    user: str = Field(default="CNHUSUN", description="User identifier")
+    content: str = Field(default="", description="Feedback details")
 
 
 class ErrorResponse(BaseModel):

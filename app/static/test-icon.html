@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Icon Test</title>
+    <style>
+        body {
+            padding: 50px;
+            background: #f0f0f0;
+        }
+        .test-avatar {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: transparent;
+            position: relative;
+            overflow: visible;
+            background-image: url('/static-debug/chatbot.png');
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+            margin: 20px;
+            display: inline-block;
+        }
+        .test-avatar::after {
+            content: '';
+            position: absolute;
+            right: -6px;
+            top: -4px;
+            width: 18px;
+            height: 18px;
+            background-image: url('/static-debug/ai_star.png');
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+            z-index: 1;
+        }
+        .info {
+            margin: 20px;
+            font-family: Arial;
+        }
+    </style>
+</head>
+<body>
+    <h1>图标测试页面</h1>
+    
+    <div class="info">
+        <h2>测试图标：</h2>
+        <div class="test-avatar"></div>
+    </div>
+    
+    <div class="info">
+        <h2>单独图片测试：</h2>
+        <p>主图标：</p>
+        <img src="/static-debug/chatbot.png" style="width: 42px; height: 42px;">
+        
+        <p>星星图标：</p>
+        <img src="/static-debug/ai_star.png" style="width: 18px; height: 18px;">
+    </div>
+</body>
+</html>

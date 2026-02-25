@@ -17,6 +17,14 @@ class ChatBot {
         this.sendBtn = document.getElementById('sendBtn');
         this.clearBtn = document.getElementById('clearBtn');
         
+        // Sidebar elements
+        this.menuBtn = document.getElementById('menuBtn');
+        this.sidebar = document.getElementById('sidebar');
+        this.sidebarOverlay = document.getElementById('sidebarOverlay');
+        this.closeSidebar = document.getElementById('closeSidebar');
+        this.conversationList = document.getElementById('conversationList');
+        this.activeConversationMenu = null;
+        
         this.init();
     }
     
@@ -26,6 +34,12 @@ class ChatBot {
         // 使用 click 事件，按钮类型改为 button 避免自动提交
         this.sendBtn.addEventListener('click', (e) => this.handleSendButtonClick(e));
         this.clearBtn.addEventListener('click', () => this.clearChat());
+        
+        // Sidebar event listeners
+        this.menuBtn.addEventListener('click', () => this.openSidebar());
+        this.closeSidebar.addEventListener('click', () => this.closeSidebarPanel());
+        this.sidebarOverlay.addEventListener('click', () => this.closeSidebarPanel());
+        document.addEventListener('click', () => this.closeAllConversationMenus());
         
         // Auto-resize textarea
         this.messageInput.addEventListener('input', () => this.autoResize());
@@ -155,13 +169,8 @@ class ChatBot {
     }
     
     generateUserId() {
-        // Generate or retrieve user ID from localStorage
-        let userId = localStorage.getItem('chatbot_user_id');
-        if (!userId) {
-            userId = 'user_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('chatbot_user_id', userId);
-        }
-        return userId;
+        // Use fixed user ID
+        return 'CNHUSUN';
     }
     
     // 增强版 Markdown 转换为 HTML
@@ -385,6 +394,7 @@ class ChatBot {
         let messageCreated = false;
         let messageDiv = null;
         let contentDiv = null;
+        let difyMessageId = null;
         
         try {
             console.log('=== MAKING FETCH REQUEST ===');
@@ -480,6 +490,12 @@ class ChatBot {
                                             }
                                             this.scrollToBottom();
                                         }
+
+                                        const eventMessageId = json.message_id || json.id || null;
+                                        if (eventMessageId && eventMessageId !== difyMessageId) {
+                                            difyMessageId = eventMessageId;
+                                            this.setBotMessageId(messageDiv, difyMessageId);
+                                        }
                                     } else {
                                         console.log('[MESSAGE EVENT] Answer is empty - skipping (workflow app sends answer in workflow_finished)');
                                     }
@@ -491,6 +507,11 @@ class ChatBot {
                                     if (json.conversation_id) {
                                         this.conversationId = json.conversation_id;
                                         console.log('Updated conversation_id:', this.conversationId);
+                                    }
+                                    const endMessageId = json.message_id || json.id || null;
+                                    if (endMessageId && endMessageId !== difyMessageId) {
+                                        difyMessageId = endMessageId;
+                                        this.setBotMessageId(messageDiv, difyMessageId);
                                     }
                                 } else if (json.event === 'agent_message' || json.event === 'text_chunk') {
                                     console.log('[AGENT_MESSAGE/TEXT_CHUNK EVENT] Processing...');
@@ -636,24 +657,27 @@ class ChatBot {
         }
     }
     
-    addMessage(content, type) {
-        // 如果是机器人消息，先移除所有之前的免责声明
+    addMessage(content, type, difyMessageId = null) {
         if (type === 'bot') {
             const oldDisclaimers = this.chatMessages.querySelectorAll('.message-disclaimer');
             oldDisclaimers.forEach(disclaimer => disclaimer.remove());
         }
-        
+
         const messageId = 'msg_' + Date.now();
-        const messageDiv = this.createMessageElement(content, type, messageId);
+        const messageDiv = this.createMessageElement(content, type, messageId, difyMessageId);
         this.chatMessages.appendChild(messageDiv);
         this.scrollToBottom();
         return messageId;
     }
     
-    createMessageElement(content, type, id) {
+    createMessageElement(content, type, id, difyMessageId = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}-message`;
         messageDiv.id = id;
+
+        if (type === 'bot' && difyMessageId) {
+            messageDiv.dataset.difyMessageId = difyMessageId;
+        }
         
         const avatar = document.createElement('div');
         avatar.className = `message-avatar ${type}-avatar`;
@@ -679,6 +703,63 @@ class ChatBot {
         
         markdownBody.appendChild(p);
         contentDiv.appendChild(markdownBody);
+
+        if (type === 'bot') {
+            const feedbackWrap = document.createElement('div');
+            feedbackWrap.className = 'message-feedback-actions';
+
+            const likeBtn = document.createElement('button');
+            likeBtn.type = 'button';
+            likeBtn.className = 'message-like-btn';
+            likeBtn.title = '点赞';
+            likeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-1 7v13h9a2 2 0 0 0 2-2l1-7a2 2 0 0 0-2-2h-6z"/><path d="M7 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h3"/></svg>';
+
+            const dislikeBtn = document.createElement('button');
+            dislikeBtn.type = 'button';
+            dislikeBtn.className = 'message-dislike-btn';
+            dislikeBtn.title = '点踩';
+            dislikeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l1-7V2H5a2 2 0 0 0-2 2l-1 7a2 2 0 0 0 2 2h6z"/><path d="M17 2h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3"/></svg>';
+
+            likeBtn.disabled = !difyMessageId;
+            dislikeBtn.disabled = !difyMessageId;
+
+            const submitFeedback = async (targetRating) => {
+                const messageFeedbackId = messageDiv.dataset.difyMessageId;
+                if (!messageFeedbackId || likeBtn.disabled || dislikeBtn.disabled) {
+                    return;
+                }
+
+                const currentRating = messageDiv.dataset.feedbackRating || '';
+                const nextRating = currentRating === targetRating ? null : targetRating;
+
+                likeBtn.disabled = true;
+                dislikeBtn.disabled = true;
+                try {
+                    await this.sendMessageFeedback(messageFeedbackId, nextRating, '');
+                    this.setFeedbackState(messageDiv, nextRating);
+                } catch (error) {
+                    console.error('Feedback failed:', error);
+                    alert('反馈失败，请重试');
+                } finally {
+                    likeBtn.disabled = false;
+                    dislikeBtn.disabled = false;
+                }
+            };
+
+            likeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await submitFeedback('like');
+            });
+
+            dislikeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await submitFeedback('dislike');
+            });
+
+            feedbackWrap.appendChild(likeBtn);
+            feedbackWrap.appendChild(dislikeBtn);
+            contentDiv.appendChild(feedbackWrap);
+        }
         
         // 为机器人消息添加免责声明
         if (type === 'bot') {
@@ -693,6 +774,67 @@ class ChatBot {
         messageDiv.appendChild(contentDiv);
         
         return messageDiv;
+    }
+
+    setBotMessageId(messageDiv, difyMessageId) {
+        if (!messageDiv || !difyMessageId) {
+            return;
+        }
+
+        messageDiv.dataset.difyMessageId = difyMessageId;
+        const actionBtns = messageDiv.querySelectorAll('.message-like-btn, .message-dislike-btn');
+        actionBtns.forEach((btn) => {
+            btn.disabled = false;
+        });
+    }
+
+    setFeedbackState(messageDiv, rating) {
+        if (!messageDiv) {
+            return;
+        }
+
+        if (rating) {
+            messageDiv.dataset.feedbackRating = rating;
+        } else {
+            delete messageDiv.dataset.feedbackRating;
+        }
+
+        const likeBtn = messageDiv.querySelector('.message-like-btn');
+        const dislikeBtn = messageDiv.querySelector('.message-dislike-btn');
+
+        if (likeBtn) {
+            likeBtn.classList.toggle('feedback-liked', rating === 'like');
+        }
+        if (dislikeBtn) {
+            dislikeBtn.classList.toggle('feedback-disliked', rating === 'dislike');
+        }
+    }
+
+    async sendMessageFeedback(messageId, rating = 'like', content = '') {
+        const response = await fetch(`/api/v1/messages/${messageId}/feedbacks`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                rating,
+                user: this.userId,
+                content
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to send feedback');
+        }
+
+        return response.json();
+    }
+
+    getDifyMessageId(message) {
+        if (!message) {
+            return null;
+        }
+        return message.message_id || message.id || null;
     }
     
     showTypingIndicator() {
@@ -710,12 +852,10 @@ class ChatBot {
         
         const typingDiv = document.createElement('div');
         typingDiv.className = 'typing-indicator';
-        const letters = 'EasyMES';
-        for (let i = 0; i < letters.length; i++) {
-            const letter = document.createElement('span');
-            letter.className = 'typing-letter';
-            letter.textContent = letters[i];
-            typingDiv.appendChild(letter);
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement('span');
+            dot.className = 'typing-dot';
+            typingDiv.appendChild(dot);
         }
         
         contentDiv.appendChild(typingDiv);
@@ -738,7 +878,263 @@ class ChatBot {
     clearChat() {
         this.chatMessages.innerHTML = '';
         this.conversationId = null;
-        console.log('Chat cleared');
+        console.log('Started new conversation');
+    }
+    
+    // Sidebar methods
+    async openSidebar() {
+        this.sidebar.classList.add('open');
+        this.sidebarOverlay.classList.add('show');
+        await this.loadConversations();
+    }
+    
+    closeSidebarPanel() {
+        this.sidebar.classList.remove('open');
+        this.sidebarOverlay.classList.remove('show');
+        this.closeAllConversationMenus();
+    }
+    
+    async loadConversations() {
+        try {
+            this.conversationList.innerHTML = '<div class="loading-conversations"><div class="spinner"></div><span>加载中...</span></div>';
+            
+            const response = await fetch(`/api/v1/conversations?user=${this.userId}&limit=80`);
+            if (!response.ok) {
+                throw new Error('Failed to load conversations');
+            }
+            
+            const data = await response.json();
+            this.renderConversations(data.data || []);
+        } catch (error) {
+            console.error('Error loading conversations:', error);
+            this.conversationList.innerHTML = '<div class="no-conversations">加载失败，请重试</div>';
+        }
+    }
+    
+    renderConversations(conversations) {
+        if (!conversations || conversations.length === 0) {
+            this.conversationList.innerHTML = '<div class="no-conversations">暂无历史会话</div>';
+            return;
+        }
+        
+        this.conversationList.innerHTML = '';
+        // 反转数组，使最新的会话显示在最前面
+        const reversedConversations = [...conversations].reverse();
+        reversedConversations.forEach(conv => {
+            const item = document.createElement('div');
+            item.className = 'conversation-item';
+            if (conv.id === this.conversationId) {
+                item.classList.add('active');
+            }
+
+            const main = document.createElement('div');
+            main.className = 'conversation-main';
+            
+            const name = document.createElement('div');
+            name.className = 'conversation-name';
+            name.textContent = conv.name || '新对话';
+            
+            const time = document.createElement('div');
+            time.className = 'conversation-time';
+            time.textContent = this.formatTimestamp(conv.updated_at || conv.created_at);
+
+            const actions = document.createElement('div');
+            actions.className = 'conversation-actions';
+
+            const menuBtn = document.createElement('button');
+            menuBtn.className = 'conversation-menu-btn';
+            menuBtn.type = 'button';
+            menuBtn.title = '更多操作';
+            menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
+
+            const menu = document.createElement('div');
+            menu.className = 'conversation-item-menu';
+            menu.innerHTML = '<button type="button" class="conversation-delete-btn" title="删除会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg></button>';
+
+            menuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleConversationMenu(menu);
+            });
+
+            menu.addEventListener('click', (e) => e.stopPropagation());
+
+            const deleteBtn = menu.querySelector('.conversation-delete-btn');
+            deleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                this.closeAllConversationMenus();
+                await this.handleDeleteConversation(conv.id, conv.name || '新对话');
+            });
+
+            actions.appendChild(menuBtn);
+            actions.appendChild(menu);
+
+            main.appendChild(name);
+            main.appendChild(time);
+            
+            item.appendChild(main);
+            item.appendChild(actions);
+            
+            item.addEventListener('click', () => this.loadConversation(conv.id));
+            
+            this.conversationList.appendChild(item);
+        });
+    }
+
+    toggleConversationMenu(menuElement) {
+        if (this.activeConversationMenu && this.activeConversationMenu !== menuElement) {
+            this.activeConversationMenu.classList.remove('show');
+            this.activeConversationMenu.closest('.conversation-item')?.classList.remove('menu-open');
+        }
+
+        const shouldShow = !menuElement.classList.contains('show');
+        this.closeAllConversationMenus();
+        if (shouldShow) {
+            menuElement.classList.add('show');
+            menuElement.closest('.conversation-item')?.classList.add('menu-open');
+            this.activeConversationMenu = menuElement;
+        }
+    }
+
+    closeAllConversationMenus() {
+        const menus = this.conversationList.querySelectorAll('.conversation-item-menu.show');
+        menus.forEach(menu => {
+            menu.classList.remove('show');
+            menu.closest('.conversation-item')?.classList.remove('menu-open');
+        });
+        this.activeConversationMenu = null;
+    }
+
+    async handleDeleteConversation(conversationId, conversationName) {
+        const confirmed = await this.showDeleteConfirmDialog(conversationName);
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/v1/conversations/${conversationId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ user: this.userId })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to delete conversation');
+            }
+
+            if (this.conversationId === conversationId) {
+                this.clearChat();
+            }
+
+            await this.loadConversations();
+        } catch (error) {
+            console.error('Error deleting conversation:', error);
+            alert('删除会话失败，请重试');
+        }
+    }
+
+    showDeleteConfirmDialog(conversationName) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'delete-confirm-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'delete-confirm-modal';
+            modal.innerHTML = `
+                <div class="delete-confirm-title">确认删除会话？</div>
+                <div class="delete-confirm-text">将删除「${this.escapeHtml(conversationName)}」及其聊天记录，此操作不可恢复。</div>
+                <div class="delete-confirm-actions">
+                    <button type="button" class="delete-confirm-cancel">取消</button>
+                    <button type="button" class="delete-confirm-ok">删除</button>
+                </div>
+            `;
+
+            const close = (result) => {
+                overlay.remove();
+                resolve(result);
+            };
+
+            overlay.addEventListener('click', () => close(false));
+            modal.addEventListener('click', (e) => e.stopPropagation());
+            modal.querySelector('.delete-confirm-cancel').addEventListener('click', () => close(false));
+            modal.querySelector('.delete-confirm-ok').addEventListener('click', () => close(true));
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+        });
+    }
+    
+    async loadConversation(conversationId) {
+        try {
+            // 关闭侧边栏
+            this.closeSidebarPanel();
+            
+            // 清空当前聊天
+            this.chatMessages.innerHTML = '';
+            this.conversationId = conversationId;
+            
+            // 显示加载提示
+            const loadingId = this.showTypingIndicator();
+            
+            // 加载会话消息
+            const response = await fetch(`/api/v1/conversations/${conversationId}/messages?user=${this.userId}`);
+            if (!response.ok) {
+                throw new Error('Failed to load messages');
+            }
+            
+            const data = await response.json();
+            this.removeMessage(loadingId);
+            
+            // 渲染消息
+            if (data.data && data.data.length > 0) {
+                // 按后端返回的顺序显示消息
+                const messages = data.data;
+                messages.forEach(msg => {
+                    // 显示用户消息
+                    if (msg.query) {
+                        this.addMessage(msg.query, 'user');
+                    }
+                    // 显示机器人回复
+                    if (msg.answer) {
+                        this.addMessage(msg.answer, 'bot', this.getDifyMessageId(msg));
+                    }
+                });
+            }
+            
+            this.scrollToBottom();
+        } catch (error) {
+            console.error('Error loading conversation:', error);
+            alert('加载会话失败，请重试');
+        }
+    }
+    
+    formatTimestamp(timestamp) {
+        if (!timestamp) return '';
+        
+        const date = new Date(timestamp * 1000);
+        const now = new Date();
+        const diff = now - date;
+        
+        // 小于1分钟
+        if (diff < 60000) {
+            return '刚刚';
+        }
+        // 小于1小时
+        if (diff < 3600000) {
+            return `${Math.floor(diff / 60000)}分钟前`;
+        }
+        // 小于1天
+        if (diff < 86400000) {
+            return `${Math.floor(diff / 3600000)}小时前`;
+        }
+        // 小于7天
+        if (diff < 604800000) {
+            return `${Math.floor(diff / 86400000)}天前`;
+        }
+        
+        // 超过7天，显示具体日期
+        return `${date.getMonth() + 1}/${date.getDate()}`;
     }
     
     scrollToBottom() {
