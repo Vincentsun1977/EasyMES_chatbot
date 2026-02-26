@@ -116,7 +116,7 @@ async def chat_websocket(websocket: WebSocket):
             
             query = request_data.get("query")
             conversation_id = request_data.get("conversation_id")
-            user = request_data.get("user", "CNHUSUN")
+            employee_id = request_data.get("user") or request_data.get("employee_id")
             inputs = request_data.get("inputs", {})
             
             if not query:
@@ -125,12 +125,19 @@ async def chat_websocket(websocket: WebSocket):
                     "message": "Query is required"
                 })
                 continue
+
+            if not employee_id:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "User identifier is required"
+                })
+                continue
             
             # Stream response back to client
             try:
                 async for chunk in dify_client.stream_message(
                     query=query,
-                    user=user,
+                    user=employee_id,
                     conversation_id=conversation_id,
                     inputs=inputs
                 ):
@@ -162,7 +169,7 @@ async def chat_websocket(websocket: WebSocket):
 
 @router.get("/conversations")
 async def get_conversations(
-    user: str = "CNHUSUN",
+    user: str,
     last_id: str = None,
     limit: int = 20,
     sort_by: str = "created_at"
@@ -201,7 +208,7 @@ async def get_conversations(
 
 
 @router.get("/conversations/{conversation_id}/messages")
-async def get_conversation_messages(conversation_id: str, user: str = "CNHUSUN"):
+async def get_conversation_messages(conversation_id: str, user: str):
     """
     Get messages for a specific conversation.
     

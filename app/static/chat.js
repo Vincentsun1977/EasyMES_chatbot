@@ -169,8 +169,10 @@ class ChatBot {
     }
     
     generateUserId() {
-        // Use fixed user ID
-        return 'CNHUSUN';
+        const params = new URLSearchParams(window.location.search);
+        const employeeId = params.get('EmployeeId') || params.get('employee_id');
+        const globalEmployeeId = window.employee_id || window.employeeId;
+        return employeeId || globalEmployeeId || 'CNHUSUN';
     }
     
     // 增强版 Markdown 转换为 HTML
@@ -227,6 +229,9 @@ class ChatBot {
         
         // 转换斜体文本 *text*
         html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+        // 自动识别并转换链接（http/https）
+        html = this.linkifyUrls(html);
         
         // 转换有序列表 1. text (必须是行首，且点后有空格)
         html = html.replace(/^(\d+)\.\s+(.+)$/gm, '<li class="ordered">$2</li>');
@@ -249,6 +254,21 @@ class ChatBot {
         });
         
         return html;
+    }
+
+    linkifyUrls(text) {
+        const urlRegex = /(https?:\/\/[^\s<]+)/g;
+        return text.replace(urlRegex, (url) => {
+            let cleanUrl = url;
+            let trailing = '';
+            const trailingMatch = cleanUrl.match(/[.,!?;:)]$/);
+            if (trailingMatch) {
+                trailing = trailingMatch[0];
+                cleanUrl = cleanUrl.slice(0, -1);
+            }
+
+            return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>${trailing}`;
+        });
     }
     
     // HTML转义函数
@@ -345,30 +365,36 @@ class ChatBot {
     
     async handleSubmit(e) {
         e.preventDefault();
+        const message = this.messageInput.value.trim();
+        if (!message) return;
+
+        await this.submitMessage(message, true);
+    }
+
+    async submitMessage(message, clearInput = false) {
         // 如果正在流式传输，阻止提交
         if (this.isStreaming) {
             console.log('Already streaming, ignoring submit');
             return;
         }
-        
-        const message = this.messageInput.value.trim();
-        if (!message) return;
-        
+
         this.updateSendButton(true);
-        
+
         // Add user message to chat
         this.addMessage(message, 'user');
-        
-        // Clear input
-        this.messageInput.value = '';
-        this.autoResize();
-        
+
+        if (clearInput) {
+            // Clear input
+            this.messageInput.value = '';
+            this.autoResize();
+        }
+
         // Disable input while processing
         this.setInputState(false);
-        
+
         // Show typing indicator
         const typingId = this.showTypingIndicator();
-        
+
         try {
             // Send message with streaming
             await this.sendMessageStream(message);
@@ -379,6 +405,27 @@ class ChatBot {
         } finally {
             this.setInputState(true);
             this.messageInput.focus();
+        }
+    }
+
+    async copyText(text) {
+        const copyContent = text || '';
+        if (!copyContent) {
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(copyContent);
+        } catch (error) {
+            const textarea = document.createElement('textarea');
+            textarea.value = copyContent;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
         }
     }
     
@@ -674,6 +721,7 @@ class ChatBot {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}-message`;
         messageDiv.id = id;
+        let userBody = null;
 
         if (type === 'bot' && difyMessageId) {
             messageDiv.dataset.difyMessageId = difyMessageId;
@@ -704,6 +752,43 @@ class ChatBot {
         markdownBody.appendChild(p);
         contentDiv.appendChild(markdownBody);
 
+        if (type === 'user') {
+            const userActions = document.createElement('div');
+            userActions.className = 'message-user-actions';
+
+            const retryBtn = document.createElement('button');
+            retryBtn.type = 'button';
+            retryBtn.className = 'message-user-action-btn';
+            retryBtn.title = '再次执行';
+            retryBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/></svg>';
+
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'message-user-action-btn';
+            copyBtn.title = '复制问题';
+            copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+            retryBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                await this.submitMessage(content, false);
+            });
+
+            copyBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                await this.copyText(content);
+            });
+
+            userActions.appendChild(retryBtn);
+            userActions.appendChild(copyBtn);
+
+            userBody = document.createElement('div');
+            userBody.className = 'message-user-body';
+            userBody.appendChild(contentDiv);
+            userBody.appendChild(userActions);
+        }
+
         if (type === 'bot') {
             const feedbackWrap = document.createElement('div');
             feedbackWrap.className = 'message-feedback-actions';
@@ -719,6 +804,12 @@ class ChatBot {
             dislikeBtn.className = 'message-dislike-btn';
             dislikeBtn.title = '点踩';
             dislikeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l1-7V2H5a2 2 0 0 0-2 2l-1 7a2 2 0 0 0 2 2h6z"/><path d="M17 2h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3"/></svg>';
+
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'message-copy-btn';
+            copyBtn.title = '复制回复';
+            copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
             likeBtn.disabled = !difyMessageId;
             dislikeBtn.disabled = !difyMessageId;
@@ -756,8 +847,16 @@ class ChatBot {
                 await submitFeedback('dislike');
             });
 
+            copyBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const markdownBody = messageDiv.querySelector('.markdown-body');
+                const replyText = markdownBody ? markdownBody.textContent.trim() : '';
+                await this.copyText(replyText);
+            });
+
             feedbackWrap.appendChild(likeBtn);
             feedbackWrap.appendChild(dislikeBtn);
+            feedbackWrap.appendChild(copyBtn);
             contentDiv.appendChild(feedbackWrap);
         }
         
@@ -771,7 +870,7 @@ class ChatBot {
         }
         
         messageDiv.appendChild(avatar);
-        messageDiv.appendChild(contentDiv);
+        messageDiv.appendChild(type === 'user' && userBody ? userBody : contentDiv);
         
         return messageDiv;
     }

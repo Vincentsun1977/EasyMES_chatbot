@@ -176,7 +176,7 @@ class DifyClient:
     async def send_message(
         self,
         query: str,
-        user: str = "CNHUSUN",
+        user: str,
         conversation_id: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -221,7 +221,7 @@ class DifyClient:
     async def delete_conversation(
         self,
         conversation_id: str,
-        user: str = "CNHUSUN"
+        user: str
     ) -> None:
         """
         Delete a conversation in Dify.
@@ -256,7 +256,7 @@ class DifyClient:
         self,
         message_id: str,
         rating: Optional[str] = "like",
-        user: str = "CNHUSUN",
+        user: str = "",
         content: str = ""
     ) -> Dict[str, Any]:
         """
@@ -300,7 +300,7 @@ class DifyClient:
     async def stream_message(
         self,
         query: str,
-        user: str = "CNHUSUN",
+        user: str,
         conversation_id: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[str, None]:
@@ -444,7 +444,7 @@ class DifyClient:
     
     async def get_conversations(
         self, 
-        user: str = "CNHUSUN", 
+        user: str,
         last_id: Optional[str] = None,
         limit: int = 20,
         sort_by: str = "-updated_at"
@@ -506,7 +506,7 @@ class DifyClient:
     async def get_conversation_messages(
         self,
         conversation_id: str,
-        user: str = "CNHUSUN"
+        user: str
     ) -> Dict[str, Any]:
         """
         Get messages for a specific conversation.

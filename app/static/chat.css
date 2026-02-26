@@ -471,6 +471,7 @@ body {
     color: #ffffff;
     border-bottom-right-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.2);
+    max-width: 100%;
 }
 
 .message-content::after {
@@ -488,8 +489,46 @@ body {
     gap: 8px;
 }
 
+.message-user-actions {
+    margin-top: 6px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.message-user-body {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: 72%;
+}
+
+.message-user-action-btn {
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    width: 22px;
+    height: 22px;
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.message-user-action-btn:hover {
+    color: var(--red-1);
+    background: transparent;
+}
+
+.message-user-action-btn:active {
+    transform: scale(0.96);
+}
+
 .message-like-btn,
-.message-dislike-btn {
+.message-dislike-btn,
+.message-copy-btn {
     border: 1px solid #d1d5db;
     background: #ffffff;
     color: #6b7280;
@@ -504,7 +543,8 @@ body {
 }
 
 .message-like-btn:hover:not(:disabled),
-.message-dislike-btn:hover:not(:disabled) {
+.message-dislike-btn:hover:not(:disabled),
+.message-copy-btn:hover {
     color: var(--red-1);
     border-color: var(--red-1);
     background: #fff5f5;
@@ -803,6 +843,15 @@ body {
         line-height: 1.5;
         border-radius: 14px;
     }
+
+    .message-user-body {
+        max-width: 85%;
+    }
+
+    .message-user-action-btn {
+        width: 24px;
+        height: 24px;
+    }
     
     .bot-message .message-content {
         border-bottom-left-radius: 4px;
@@ -952,6 +1001,10 @@ body {
         max-width: 88%;
         font-size: 13px;
         padding: 9px 12px;
+    }
+
+    .message-user-body {
+        max-width: 88%;
     }
     
     .message-avatar {
