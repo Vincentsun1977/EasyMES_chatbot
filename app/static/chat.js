@@ -124,7 +124,7 @@ class ChatBot {
         this.chatMessages.style.webkitOverflowScrolling = 'touch';
         
         // 为按钮添加触摸反馈
-        [this.sendBtn, this.clearBtn].forEach(btn => {
+        [this.sendBtn, this.clearBtn].filter(Boolean).forEach(btn => {
             btn.addEventListener('touchstart', () => {
                 btn.style.opacity = '0.7';
             });
@@ -134,7 +134,7 @@ class ChatBot {
         });
     }
     
-    handleSendButtonClick(e) {
+    async handleSendButtonClick(e) {
         try {
             e.preventDefault();
             e.stopPropagation();
@@ -144,16 +144,25 @@ class ChatBot {
                 console.log('Stopping stream...');
                 this.stopStreaming();
             } else {
-                const message = (this.messageInput?.value || '').trim();
-                if (!message) {
-                    return;
+                console.log('Button clicked, triggering form submit...');
+                if (this.chatForm && typeof this.chatForm.requestSubmit === 'function') {
+                    this.chatForm.requestSubmit();
+                } else if (this.chatForm) {
+                    this.chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
                 }
-                console.log('Button clicked, calling submitMessage...');
-                this.submitMessage(message, true);
             }
         } catch (error) {
             console.error('[SendButton] Click handler error:', error);
         }
+    }
+
+    async sendCurrentMessage() {
+        const message = (this.messageInput?.value || '').trim();
+        if (!message) {
+            return;
+        }
+
+        await this.submitMessage(message, true);
     }
     
     stopStreaming() {
@@ -170,6 +179,10 @@ class ChatBot {
     
     updateSendButton(isStreaming) {
         const svg = this.sendBtn.querySelector('svg');
+        if (!svg) {
+            console.warn('[SendButton] SVG icon not found, skip icon update');
+            return;
+        }
         if (isStreaming) {
             // 停止图标 (方块)
             svg.innerHTML = '<rect x="6" y="6" width="12" height="12" fill="currentColor" stroke="none"/>';
@@ -186,6 +199,12 @@ class ChatBot {
         const employeeId = params.get('EmployeeId') || params.get('employee_id');
         const globalEmployeeId = window.employee_id || window.employeeId;
         return employeeId || globalEmployeeId || 'CNHUSUN';
+    }
+
+    getUserAvatarUrl() {
+        const employeeId = this.userId || 'CNHUSUN';
+        const encodedEmployeeId = encodeURIComponent(employeeId);
+        return `/api/v1/avatar?EmployeeId=${encodedEmployeeId}&avatarKey=${encodedEmployeeId}`;
     }
     
     // 增强版 Markdown 转换为 HTML
@@ -265,6 +284,9 @@ class ChatBot {
         preservedTags.forEach((tag, index) => {
             html = html.replace(`__HTML_TAG_${index}__`, tag);
         });
+
+        // 对回复中的关键数字加粗
+        html = this.emphasizeKeyNumbersInHtml(html);
         
         return html;
     }
@@ -282,6 +304,45 @@ class ChatBot {
 
             return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>${trailing}`;
         });
+    }
+
+    shouldEmphasizeNumericToken(token) {
+        if (!token) {
+            return false;
+        }
+
+        const cleanToken = String(token).trim();
+        if (!cleanToken) {
+            return false;
+        }
+
+        if (cleanToken.includes('%') || cleanToken.includes('.') || cleanToken.includes(',')) {
+            return true;
+        }
+
+        const digits = cleanToken.replace(/[^\d-]/g, '').replace('-', '');
+        return digits.length >= 2;
+    }
+
+    emphasizeKeyNumbersInHtml(html) {
+        const parts = String(html || '').split(/(<[^>]+>)/g);
+        const numberRegex = /(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?)/g;
+
+        return parts
+            .map((part) => {
+                if (!part || part.startsWith('<')) {
+                    return part;
+                }
+
+                return part.replace(numberRegex, (match) => {
+                    if (!this.shouldEmphasizeNumericToken(match)) {
+                        return match;
+                    }
+
+                    return `<strong class="key-number">${match}</strong>`;
+                });
+            })
+            .join('');
     }
     
     // HTML转义函数
@@ -495,6 +556,51 @@ class ChatBot {
         return keywords.some(keyword => source.includes(keyword));
     }
 
+    normalizeQuestionText(question) {
+        return String(question || '')
+            .toLowerCase()
+            .replace(/[\s\-_]+/g, '')
+            .replace(/[，。！？、；：,.!?;:()（）【】\[\]"'“”‘’]/g, '');
+    }
+
+    getRequestedChartTypeFromQuestion(question) {
+        const source = this.normalizeQuestionText(question);
+        if (!source) {
+            return null;
+        }
+
+        if (
+            source.includes('饼图') ||
+            source.includes('饼状图') ||
+            source.includes('pie') ||
+            source.includes('piechart')
+        ) {
+            return 'pie';
+        }
+
+        if (
+            source.includes('柱状图') ||
+            source.includes('条形图') ||
+            source.includes('barchart') ||
+            source.includes('bar')
+        ) {
+            return 'bar';
+        }
+
+        if (
+            source.includes('趋势图') ||
+            source.includes('折线图') ||
+            source.includes('走势图') ||
+            source.includes('linechart') ||
+            source.includes('line') ||
+            source.includes('trend')
+        ) {
+            return 'line';
+        }
+
+        return null;
+    }
+
     extractTableChartConfig(messageDiv, content) {
         const text = String(content || '').trim();
         if (!text && !messageDiv) {
@@ -644,6 +750,205 @@ class ChatBot {
         }
     }
 
+    createSvgElement(tag, attrs = {}) {
+        const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        Object.entries(attrs).forEach(([key, value]) => {
+            element.setAttribute(key, String(value));
+        });
+        return element;
+    }
+
+    createSvgText(x, y, text, options = {}) {
+        const textNode = this.createSvgElement('text', {
+            x,
+            y,
+            fill: options.fill || '#4b5563',
+            'font-size': options.fontSize || '10',
+            'text-anchor': options.anchor || 'middle',
+            'dominant-baseline': options.baseline || 'middle'
+        });
+        textNode.textContent = String(text ?? '');
+        return textNode;
+    }
+
+    renderNativeBarChart(svg, labels, values, colors) {
+        const width = 360;
+        const height = 180;
+        const margin = { top: 12, right: 10, bottom: 36, left: 34 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const maxValue = Math.max(...values, 1);
+
+        svg.appendChild(this.createSvgElement('line', {
+            x1: margin.left,
+            y1: margin.top + plotHeight,
+            x2: width - margin.right,
+            y2: margin.top + plotHeight,
+            stroke: '#d1d5db',
+            'stroke-width': 1
+        }));
+
+        const slotWidth = plotWidth / values.length;
+        const barWidth = Math.max(8, Math.min(26, slotWidth * 0.62));
+
+        values.forEach((value, index) => {
+            const barHeight = (value / maxValue) * plotHeight;
+            const x = margin.left + index * slotWidth + (slotWidth - barWidth) / 2;
+            const y = margin.top + plotHeight - barHeight;
+
+            svg.appendChild(this.createSvgElement('rect', {
+                x,
+                y,
+                width: barWidth,
+                height: Math.max(1, barHeight),
+                rx: 3,
+                fill: colors[index % colors.length]
+            }));
+
+            svg.appendChild(this.createSvgText(
+                x + barWidth / 2,
+                Math.max(6, y - 6),
+                value,
+                { fontSize: 9, fill: '#6b7280' }
+            ));
+
+            const label = labels[index].length > 6 ? `${labels[index].slice(0, 6)}…` : labels[index];
+            svg.appendChild(this.createSvgText(
+                x + barWidth / 2,
+                height - 14,
+                label,
+                { fontSize: 9, fill: '#6b7280' }
+            ));
+        });
+    }
+
+    renderNativeLineChart(svg, labels, values, colors) {
+        const width = 360;
+        const height = 180;
+        const margin = { top: 14, right: 10, bottom: 28, left: 34 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const maxValue = Math.max(...values, 1);
+
+        svg.appendChild(this.createSvgElement('line', {
+            x1: margin.left,
+            y1: margin.top + plotHeight,
+            x2: width - margin.right,
+            y2: margin.top + plotHeight,
+            stroke: '#d1d5db',
+            'stroke-width': 1
+        }));
+
+        const points = values.map((value, index) => {
+            const x = margin.left + (index * plotWidth) / Math.max(values.length - 1, 1);
+            const y = margin.top + plotHeight - (value / maxValue) * plotHeight;
+            return { x, y, value, label: labels[index] };
+        });
+
+        const polyline = this.createSvgElement('polyline', {
+            points: points.map(point => `${point.x},${point.y}`).join(' '),
+            fill: 'none',
+            stroke: '#ff000f',
+            'stroke-width': 2
+        });
+        svg.appendChild(polyline);
+
+        points.forEach((point, index) => {
+            svg.appendChild(this.createSvgElement('circle', {
+                cx: point.x,
+                cy: point.y,
+                r: 2.5,
+                fill: colors[index % colors.length]
+            }));
+
+            if (index % Math.ceil(points.length / 6) === 0 || index === points.length - 1) {
+                const label = point.label.length > 6 ? `${point.label.slice(0, 6)}…` : point.label;
+                svg.appendChild(this.createSvgText(point.x, height - 10, label, { fontSize: 9 }));
+            }
+        });
+    }
+
+    renderNativePieChart(svg, labels, values, colors) {
+        const width = 360;
+        const height = 180;
+        const cx = 84;
+        const cy = 90;
+        const radius = 52;
+        const total = values.reduce((sum, value) => sum + value, 0);
+        if (total <= 0) {
+            this.renderFallbackBarChart({ appendChild: (node) => svg.appendChild(node) }, { labels, values });
+            return;
+        }
+
+        let startAngle = -Math.PI / 2;
+        values.forEach((value, index) => {
+            const angle = (value / total) * Math.PI * 2;
+            const endAngle = startAngle + angle;
+            const largeArc = angle > Math.PI ? 1 : 0;
+            const x1 = cx + radius * Math.cos(startAngle);
+            const y1 = cy + radius * Math.sin(startAngle);
+            const x2 = cx + radius * Math.cos(endAngle);
+            const y2 = cy + radius * Math.sin(endAngle);
+
+            const pathData = [
+                `M ${cx} ${cy}`,
+                `L ${x1} ${y1}`,
+                `A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`,
+                'Z'
+            ].join(' ');
+
+            svg.appendChild(this.createSvgElement('path', {
+                d: pathData,
+                fill: colors[index % colors.length]
+            }));
+
+            startAngle = endAngle;
+        });
+
+        const legendStartX = 160;
+        labels.slice(0, 6).forEach((label, index) => {
+            const y = 28 + index * 24;
+            svg.appendChild(this.createSvgElement('rect', {
+                x: legendStartX,
+                y: y - 7,
+                width: 10,
+                height: 10,
+                rx: 2,
+                fill: colors[index % colors.length]
+            }));
+            const percent = Math.round((values[index] / total) * 100);
+            const legendText = `${label.length > 8 ? `${label.slice(0, 8)}…` : label} ${percent}%`;
+            svg.appendChild(this.createSvgText(legendStartX + 16, y - 1, legendText, {
+                fontSize: 10,
+                fill: '#4b5563',
+                anchor: 'start'
+            }));
+        });
+    }
+
+    renderNativeChart(chartWrapper, chartConfig) {
+        const chartBody = document.createElement('div');
+        chartBody.className = 'message-chart-body';
+
+        const svg = this.createSvgElement('svg', {
+            class: 'message-chart-svg',
+            viewBox: '0 0 360 180',
+            preserveAspectRatio: 'none'
+        });
+
+        const colors = ['#FF000F', '#FF4D5A', '#FF7A84', '#FCA5A5', '#FECACA', '#D1D5DB', '#9CA3AF', '#6B7280'];
+        if (chartConfig.chartType === 'pie') {
+            this.renderNativePieChart(svg, chartConfig.labels, chartConfig.values, colors);
+        } else if (chartConfig.chartType === 'line') {
+            this.renderNativeLineChart(svg, chartConfig.labels, chartConfig.values, colors);
+        } else {
+            this.renderNativeBarChart(svg, chartConfig.labels, chartConfig.values, colors);
+        }
+
+        chartBody.appendChild(svg);
+        chartWrapper.appendChild(chartBody);
+    }
+
     tryRenderChartForMessage(messageDiv, content, userQuestion = '') {
         try {
             if (!messageDiv || !messageDiv.id) {
@@ -668,6 +973,12 @@ class ChatBot {
             return;
         }
 
+        const requestedType = this.getRequestedChartTypeFromQuestion(userQuestion);
+        if (requestedType) {
+            chartConfig.chartType = requestedType;
+            console.log('[Chart] Using requested chart type:', requestedType, 'question:', userQuestion);
+        }
+
         const contentDiv = messageDiv.querySelector('.message-content');
         if (!contentDiv) {
             return;
@@ -689,101 +1000,7 @@ class ChatBot {
             contentDiv.appendChild(chartWrapper);
         }
 
-        if (!window.Chart) {
-            console.warn('[Chart] Chart.js unavailable, rendering fallback chart');
-            this.renderFallbackBarChart(chartWrapper, chartConfig);
-            return;
-        }
-
-        const chartBody = document.createElement('div');
-        chartBody.className = 'message-chart-body';
-
-        const canvas = document.createElement('canvas');
-        canvas.className = 'message-chart-canvas';
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.removeAttribute('width');
-        canvas.removeAttribute('height');
-
-        chartBody.appendChild(canvas);
-        chartWrapper.appendChild(chartBody);
-
-        const palette = ['#FF000F', '#FF4D5A', '#FF7A84', '#FCA5A5', '#FECACA', '#D1D5DB', '#9CA3AF', '#6B7280'];
-        const backgroundColor = chartConfig.labels.map((_, index) => palette[index % palette.length]);
-
-        const chart = new window.Chart(canvas, {
-            type: chartConfig.chartType,
-            data: {
-                labels: chartConfig.labels,
-                datasets: [{
-                    data: chartConfig.values,
-                    label: '数值',
-                    borderColor: '#FF000F',
-                    backgroundColor,
-                    borderWidth: chartConfig.chartType === 'line' ? 2 : 1,
-                    tension: chartConfig.chartType === 'line' ? 0.28 : 0,
-                    pointRadius: chartConfig.chartType === 'line' ? 2 : 0,
-                    pointHoverRadius: chartConfig.chartType === 'line' ? 3 : 0,
-                    fill: chartConfig.chartType === 'line' ? false : true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                resizeDelay: 200,
-                plugins: {
-                    legend: {
-                        display: chartConfig.chartType === 'pie',
-                        position: 'bottom',
-                        labels: {
-                            boxWidth: 8,
-                            boxHeight: 8,
-                            font: {
-                                size: 10
-                            }
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: (context) => {
-                                const label = context.label || '';
-                                const value = context.parsed?.y ?? context.parsed ?? context.raw;
-                                return `${label}: ${value}`;
-                            }
-                        }
-                    }
-                },
-                scales: chartConfig.chartType === 'pie' ? {} : {
-                    x: {
-                        grid: {
-                            display: false
-                        },
-                        ticks: {
-                            maxRotation: 0,
-                            autoSkip: true,
-                            font: {
-                                size: 10
-                            }
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: 'rgba(107, 114, 128, 0.12)'
-                        },
-                        ticks: {
-                            precision: 0,
-                            font: {
-                                size: 10
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        this.chartInstances.set(messageDiv.id, chart);
+        this.renderNativeChart(chartWrapper, chartConfig);
         } catch (error) {
             console.error('[Chart] tryRenderChartForMessage error:', error);
         }
@@ -871,10 +1088,7 @@ class ChatBot {
     
     async handleSubmit(e) {
         e.preventDefault();
-        const message = this.messageInput.value.trim();
-        if (!message) return;
-
-        await this.submitMessage(message, true);
+        await this.sendCurrentMessage();
     }
 
     async submitMessage(message, clearInput = false) {
@@ -884,34 +1098,63 @@ class ChatBot {
             return;
         }
 
-        this.updateSendButton(true);
-
-        // Add user message to chat
-        this.addMessage(message, 'user');
-
-        if (clearInput) {
-            // Clear input
-            this.messageInput.value = '';
-            this.autoResize();
-        }
-
-        // Disable input while processing
-        this.setInputState(false);
-
-        // Show typing indicator
-        const typingId = this.showTypingIndicator();
-
+        let typingId = null;
         try {
+            // Add user message to chat (with hard fallback)
+            try {
+                this.addMessage(message, 'user');
+            } catch (renderError) {
+                console.error('[Send] addMessage(user) failed, fallback to minimal bubble:', renderError);
+                this.appendUserBubbleFallback(message);
+            }
+
+            this.updateSendButton(true);
+
+            if (clearInput) {
+                // Clear input
+                this.messageInput.value = '';
+                this.autoResize();
+            }
+
+            // Disable input while processing
+            this.setInputState(false);
+
+            // Show typing indicator
+            typingId = this.showTypingIndicator();
+
             // Send message with streaming
             await this.sendMessageStream(message);
         } catch (error) {
             console.error('Error:', error);
-            this.removeMessage(typingId);
+            if (typingId) {
+                this.removeMessage(typingId);
+            }
             this.addMessage('抱歉，发生了错误。请稍后重试。', 'bot');
         } finally {
             this.setInputState(true);
             this.messageInput.focus();
         }
+    }
+
+    appendUserBubbleFallback(content) {
+        if (!this.chatMessages) {
+            return;
+        }
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message user-message';
+        const bubble = document.createElement('div');
+        bubble.className = 'message-content';
+        const markdownBody = document.createElement('div');
+        markdownBody.className = 'markdown-body';
+        const p = document.createElement('p');
+        p.textContent = String(content || '');
+        markdownBody.appendChild(p);
+        bubble.appendChild(markdownBody);
+        messageDiv.appendChild(bubble);
+
+        this.chatMessages.appendChild(messageDiv);
+        this.scrollToBottom();
     }
 
     async copyText(text) {
@@ -1242,7 +1485,12 @@ class ChatBot {
         
         const avatar = document.createElement('div');
         avatar.className = `message-avatar ${type}-avatar`;
-        avatar.textContent = type === 'bot' ? '小易' : '';
+        if (type === 'bot') {
+            avatar.textContent = '小易';
+        } else {
+            avatar.textContent = '';
+            avatar.style.backgroundImage = `url("${this.getUserAvatarUrl()}")`;
+        }
         
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
