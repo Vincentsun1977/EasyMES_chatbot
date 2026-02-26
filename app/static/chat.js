@@ -9,6 +9,7 @@ class ChatBot {
         this.isStreaming = false;
         this.isWorkflowApp = false; // 标记是否为 workflow 应用
         this.abortController = null; // 用于中断请求
+        this.chartInstances = new Map();
         
         // DOM elements
         this.chatMessages = document.getElementById('chatMessages');
@@ -30,10 +31,16 @@ class ChatBot {
     
     init() {
         // Event listeners
+        if (!this.chatForm || !this.sendBtn || !this.messageInput) {
+            console.error('[Init] Critical chat elements missing');
+            return;
+        }
         this.chatForm.addEventListener('submit', (e) => this.handleSubmit(e));
         // 使用 click 事件，按钮类型改为 button 避免自动提交
         this.sendBtn.addEventListener('click', (e) => this.handleSendButtonClick(e));
-        this.clearBtn.addEventListener('click', () => this.clearChat());
+        if (this.clearBtn) {
+            this.clearBtn.addEventListener('click', () => this.clearChat());
+        }
         
         // Sidebar event listeners
         this.menuBtn.addEventListener('click', () => this.openSidebar());
@@ -128,18 +135,24 @@ class ChatBot {
     }
     
     handleSendButtonClick(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        if (this.isStreaming) {
-            // 正在流式传输，点击停止
-            console.log('Stopping stream...');
-            this.stopStreaming();
-        } else {
-            // 直接调用 handleSubmit
-            console.log('Button clicked, calling handleSubmit...');
-            const fakeEvent = { preventDefault: () => {} };
-            this.handleSubmit(fakeEvent);
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (this.isStreaming) {
+                // 正在流式传输，点击停止
+                console.log('Stopping stream...');
+                this.stopStreaming();
+            } else {
+                const message = (this.messageInput?.value || '').trim();
+                if (!message) {
+                    return;
+                }
+                console.log('Button clicked, calling submitMessage...');
+                this.submitMessage(message, true);
+            }
+        } catch (error) {
+            console.error('[SendButton] Click handler error:', error);
         }
     }
     
@@ -281,6 +294,499 @@ class ChatBot {
             "'": '&#039;'
         };
         return text.replace(/[&<>"']/g, (m) => map[m]);
+    }
+
+    stripMarkdownSyntax(text) {
+        return String(text || '')
+            .replace(/<[^>]*>/g, '')
+            .replace(/\*\*|__/g, '')
+            .replace(/[*_`~]/g, '')
+            .trim();
+    }
+
+    getNumericValueFromText(text) {
+        const source = String(text || '').replace(/,/g, '').trim();
+        const match = source.match(/-?\d+(?:\.\d+)?/);
+        if (!match) {
+            return null;
+        }
+        const value = Number(match[0]);
+        return Number.isFinite(value) ? value : null;
+    }
+
+    isTimeLikeLabel(label) {
+        const normalized = String(label || '').trim();
+        return /(\d{4}[-\/.年]\d{1,2}|\d{1,2}[-\/.月]\d{1,2}|\d{1,2}月|Q[1-4]|第[一二三四]季|周|星期|周[一二三四五六日天]|\d{4}年|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(normalized);
+    }
+
+    extractPairsFromMarkdownTable(content) {
+        const lines = String(content || '').split('\n').map(line => line.trim());
+        const tableLines = lines.filter(line => line.startsWith('|') && line.endsWith('|'));
+        if (tableLines.length < 3) {
+            return [];
+        }
+
+        const dataRows = tableLines.slice(2);
+        const result = [];
+
+        for (const row of dataRows) {
+            const cells = row.split('|').map(cell => this.stripMarkdownSyntax(cell)).filter(Boolean);
+            if (cells.length < 2) {
+                continue;
+            }
+
+            const label = cells[0];
+            const rawValue = cells[1];
+            const value = this.getNumericValueFromText(rawValue);
+            if (!label || value === null) {
+                continue;
+            }
+
+            result.push({ label, value, rawValue });
+        }
+
+        return result;
+    }
+
+    extractPairsFromLines(content) {
+        const lines = String(content || '').split('\n').map(line => line.trim()).filter(Boolean);
+        const result = [];
+        const patterns = [
+            /^[-*]\s*([^:：]{1,40})\s*[:：]\s*([-+]?\d[\d,.]*\s*%?)/,
+            /^(?:\d+[.)、]\s*)?([^:：]{1,40})\s*[:：]\s*([-+]?\d[\d,.]*\s*%?)/,
+            /^([^:：]{1,30})\s+([-+]?\d[\d,.]*\s*%?)$/
+        ];
+
+        for (const line of lines) {
+            const plainLine = this.stripMarkdownSyntax(line);
+            let matched = null;
+            for (const pattern of patterns) {
+                const match = plainLine.match(pattern);
+                if (match) {
+                    matched = match;
+                    break;
+                }
+            }
+
+            if (!matched) {
+                continue;
+            }
+
+            const label = this.stripMarkdownSyntax(matched[1]);
+            const rawValue = matched[2];
+            const value = this.getNumericValueFromText(rawValue);
+            if (!label || value === null) {
+                continue;
+            }
+
+            result.push({ label, value, rawValue });
+        }
+
+        return result;
+    }
+
+    extractPairsFromStructuredRows(content) {
+        const lines = String(content || '').split('\n').map(line => line.trim()).filter(Boolean);
+        if (lines.length < 3) {
+            return [];
+        }
+
+        const splitColumns = (line) => {
+            if (line.includes('\t')) {
+                return line.split(/\t+/).map(cell => this.stripMarkdownSyntax(cell)).filter(Boolean);
+            }
+            return line.split(/\s{2,}/).map(cell => this.stripMarkdownSyntax(cell)).filter(Boolean);
+        };
+
+        const headerCells = splitColumns(lines[0]);
+        if (headerCells.length < 2) {
+            return [];
+        }
+
+        const dataRows = lines.slice(1);
+        const result = [];
+
+        for (const row of dataRows) {
+            const cells = splitColumns(row);
+            if (cells.length < 2) {
+                continue;
+            }
+
+            const rawValue = cells[cells.length - 1];
+            const value = this.getNumericValueFromText(rawValue);
+            if (value === null) {
+                continue;
+            }
+
+            let label = '';
+            if (cells.length >= 3 && /^\d+$/.test(cells[0])) {
+                label = cells[1];
+            } else {
+                label = cells[0];
+            }
+
+            label = this.stripMarkdownSyntax(label);
+            if (!label) {
+                continue;
+            }
+
+            result.push({ label, value, rawValue });
+        }
+
+        return result;
+    }
+
+    extractPairsFromRenderedTable(messageDiv) {
+        if (!messageDiv) {
+            return [];
+        }
+
+        const table = messageDiv.querySelector('.markdown-body table');
+        if (!table) {
+            return [];
+        }
+
+        const rows = table.querySelectorAll('tbody tr');
+        if (!rows.length) {
+            return [];
+        }
+
+        const result = [];
+        rows.forEach((row) => {
+            const cells = Array.from(row.querySelectorAll('td'))
+                .map(td => this.stripMarkdownSyntax(td.textContent || ''))
+                .filter(Boolean);
+
+            if (cells.length < 2) {
+                return;
+            }
+
+            const rawValue = cells[cells.length - 1];
+            const value = this.getNumericValueFromText(rawValue);
+            if (value === null) {
+                return;
+            }
+
+            let label = '';
+            if (cells.length >= 3 && /^\d+$/.test(cells[0])) {
+                label = cells[1];
+            } else {
+                label = cells[0];
+            }
+
+            label = this.stripMarkdownSyntax(label);
+            if (!label) {
+                return;
+            }
+
+            result.push({ label, value, rawValue });
+        });
+
+        return result;
+    }
+
+    shouldGenerateChartForQuestion(question) {
+        const source = String(question || '').toLowerCase();
+        if (!source) {
+            return false;
+        }
+
+        const keywords = ['图表', 'chart', '柱状图', '饼图', '趋势图'];
+        return keywords.some(keyword => source.includes(keyword));
+    }
+
+    extractTableChartConfig(messageDiv, content) {
+        const text = String(content || '').trim();
+        if (!text && !messageDiv) {
+            return null;
+        }
+
+        // 优先解析 markdown 表格
+        const markdownPairs = this.extractPairsFromMarkdownTable(text);
+        if (markdownPairs.length >= 2) {
+            const data = markdownPairs.slice(0, 12);
+            return {
+                chartType: this.inferChartType(text, data.map(pair => pair.label), data),
+                labels: data.map(pair => pair.label),
+                values: data.map(pair => pair.value)
+            };
+        }
+
+        // 解析已渲染的 HTML 表格
+        const renderedTablePairs = this.extractPairsFromRenderedTable(messageDiv);
+        if (renderedTablePairs.length >= 2) {
+            const data = renderedTablePairs.slice(0, 12);
+            return {
+                chartType: this.inferChartType(text, data.map(pair => pair.label), data),
+                labels: data.map(pair => pair.label),
+                values: data.map(pair => pair.value)
+            };
+        }
+
+        // 解析制表符/多空格列（视作纯文本表格）
+        const structuredPairs = this.extractPairsFromStructuredRows(text);
+        if (structuredPairs.length >= 2) {
+            const data = structuredPairs.slice(0, 12);
+            return {
+                chartType: this.inferChartType(text, data.map(pair => pair.label), data),
+                labels: data.map(pair => pair.label),
+                values: data.map(pair => pair.value)
+            };
+        }
+
+        return null;
+    }
+
+    renderFallbackBarChart(chartWrapper, chartConfig) {
+        const maxValue = Math.max(...chartConfig.values, 0);
+        if (maxValue <= 0) {
+            return;
+        }
+
+        const list = document.createElement('div');
+        list.className = 'fallback-chart-list';
+
+        chartConfig.labels.forEach((label, index) => {
+            const value = chartConfig.values[index];
+            const widthPercent = Math.max(4, Math.round((value / maxValue) * 100));
+
+            const item = document.createElement('div');
+            item.className = 'fallback-chart-item';
+
+            const labelEl = document.createElement('div');
+            labelEl.className = 'fallback-chart-label';
+            labelEl.textContent = label;
+
+            const track = document.createElement('div');
+            track.className = 'fallback-chart-track';
+
+            const bar = document.createElement('div');
+            bar.className = 'fallback-chart-bar';
+            bar.style.width = `${widthPercent}%`;
+
+            const valueEl = document.createElement('span');
+            valueEl.className = 'fallback-chart-value';
+            valueEl.textContent = String(value);
+
+            bar.appendChild(valueEl);
+            track.appendChild(bar);
+            item.appendChild(labelEl);
+            item.appendChild(track);
+            list.appendChild(item);
+        });
+
+        chartWrapper.appendChild(list);
+    }
+
+    inferChartType(content, labels, pairs) {
+        const source = String(content || '');
+        const hasTrendKeyword = /(趋势|走势|变化|按月|按周|按日|同比|环比|trend|timeline|over\s*time|time\s*series|month|week|day)/i.test(source);
+        const hasRatioKeyword = /(占比|比例|构成|份额|百分比|distribution|ratio|share|composition)/i.test(source);
+        const timeLikeCount = labels.filter(label => this.isTimeLikeLabel(label)).length;
+        const hasPercentValue = pairs.some(pair => /%/.test(pair.rawValue));
+        const total = pairs.reduce((sum, pair) => sum + pair.value, 0);
+        const isNearHundred = Math.abs(total - 100) <= 2;
+
+        if (hasTrendKeyword || timeLikeCount >= Math.max(2, Math.ceil(labels.length * 0.6))) {
+            return 'line';
+        }
+        if (hasRatioKeyword || hasPercentValue || isNearHundred) {
+            return 'pie';
+        }
+        return 'bar';
+    }
+
+    extractChartConfigFromContent(content) {
+        const text = String(content || '').trim();
+        if (!text) {
+            return null;
+        }
+
+        let pairs = this.extractPairsFromMarkdownTable(text);
+        if (pairs.length < 2) {
+            pairs = this.extractPairsFromLines(text);
+        }
+        if (pairs.length < 2) {
+            pairs = this.extractPairsFromStructuredRows(text);
+        }
+        if (pairs.length < 2) {
+            return null;
+        }
+
+        const maxPoints = 12;
+        const normalized = pairs
+            .filter(pair => pair.label && Number.isFinite(pair.value))
+            .slice(0, maxPoints);
+
+        if (normalized.length < 2) {
+            return null;
+        }
+
+        const labels = normalized.map(pair => pair.label);
+        const values = normalized.map(pair => pair.value);
+        const chartType = this.inferChartType(text, labels, normalized);
+
+        return {
+            chartType,
+            labels,
+            values
+        };
+    }
+
+    cleanupChartForMessage(messageId) {
+        if (!messageId) {
+            return;
+        }
+        const existingChart = this.chartInstances.get(messageId);
+        if (existingChart) {
+            existingChart.destroy();
+            this.chartInstances.delete(messageId);
+        }
+    }
+
+    tryRenderChartForMessage(messageDiv, content, userQuestion = '') {
+        try {
+            if (!messageDiv || !messageDiv.id) {
+                return;
+            }
+
+            if (!this.shouldGenerateChartForQuestion(userQuestion)) {
+                console.log('[Chart] User question has no chart keyword, skip rendering');
+                return;
+            }
+
+        this.cleanupChartForMessage(messageDiv.id);
+        const oldWrapper = messageDiv.querySelector('.message-chart-wrapper');
+        if (oldWrapper) {
+            oldWrapper.remove();
+        }
+
+        const chartConfig = this.extractTableChartConfig(messageDiv, content);
+
+        if (!chartConfig) {
+            console.log('[Chart] No table-form data detected, skip rendering');
+            return;
+        }
+
+        const contentDiv = messageDiv.querySelector('.message-content');
+        if (!contentDiv) {
+            return;
+        }
+
+        const chartWrapper = document.createElement('div');
+        chartWrapper.className = 'message-chart-wrapper';
+
+        const chartTitle = document.createElement('div');
+        chartTitle.className = 'message-chart-title';
+        chartTitle.textContent = '数据可视化';
+
+        chartWrapper.appendChild(chartTitle);
+
+        const insertBeforeNode = contentDiv.querySelector('.message-feedback-actions') || contentDiv.querySelector('.message-disclaimer');
+        if (insertBeforeNode) {
+            contentDiv.insertBefore(chartWrapper, insertBeforeNode);
+        } else {
+            contentDiv.appendChild(chartWrapper);
+        }
+
+        if (!window.Chart) {
+            console.warn('[Chart] Chart.js unavailable, rendering fallback chart');
+            this.renderFallbackBarChart(chartWrapper, chartConfig);
+            return;
+        }
+
+        const chartBody = document.createElement('div');
+        chartBody.className = 'message-chart-body';
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'message-chart-canvas';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.removeAttribute('width');
+        canvas.removeAttribute('height');
+
+        chartBody.appendChild(canvas);
+        chartWrapper.appendChild(chartBody);
+
+        const palette = ['#FF000F', '#FF4D5A', '#FF7A84', '#FCA5A5', '#FECACA', '#D1D5DB', '#9CA3AF', '#6B7280'];
+        const backgroundColor = chartConfig.labels.map((_, index) => palette[index % palette.length]);
+
+        const chart = new window.Chart(canvas, {
+            type: chartConfig.chartType,
+            data: {
+                labels: chartConfig.labels,
+                datasets: [{
+                    data: chartConfig.values,
+                    label: '数值',
+                    borderColor: '#FF000F',
+                    backgroundColor,
+                    borderWidth: chartConfig.chartType === 'line' ? 2 : 1,
+                    tension: chartConfig.chartType === 'line' ? 0.28 : 0,
+                    pointRadius: chartConfig.chartType === 'line' ? 2 : 0,
+                    pointHoverRadius: chartConfig.chartType === 'line' ? 3 : 0,
+                    fill: chartConfig.chartType === 'line' ? false : true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                resizeDelay: 200,
+                plugins: {
+                    legend: {
+                        display: chartConfig.chartType === 'pie',
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 8,
+                            boxHeight: 8,
+                            font: {
+                                size: 10
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                const label = context.label || '';
+                                const value = context.parsed?.y ?? context.parsed ?? context.raw;
+                                return `${label}: ${value}`;
+                            }
+                        }
+                    }
+                },
+                scales: chartConfig.chartType === 'pie' ? {} : {
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            font: {
+                                size: 10
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(107, 114, 128, 0.12)'
+                        },
+                        ticks: {
+                            precision: 0,
+                            font: {
+                                size: 10
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        this.chartInstances.set(messageDiv.id, chart);
+        } catch (error) {
+            console.error('[Chart] tryRenderChartForMessage error:', error);
+        }
     }
     
     // 格式化MES数据输出
@@ -643,6 +1149,10 @@ class ChatBot {
                 }
             } else {
                 console.log('[LOOP END] Content received, no error message needed');
+                if (messageDiv) {
+                    const formattedAnswer = this.formatMesData(fullAnswer);
+                    this.tryRenderChartForMessage(messageDiv, formattedAnswer, query);
+                }
                 
                 // 添加免责声明到最新的机器人消息
                 this.addDisclaimerToLatestBotMessage();
@@ -704,7 +1214,7 @@ class ChatBot {
         }
     }
     
-    addMessage(content, type, difyMessageId = null) {
+    addMessage(content, type, difyMessageId = null, userQuestion = '') {
         if (type === 'bot') {
             const oldDisclaimers = this.chatMessages.querySelectorAll('.message-disclaimer');
             oldDisclaimers.forEach(disclaimer => disclaimer.remove());
@@ -713,6 +1223,9 @@ class ChatBot {
         const messageId = 'msg_' + Date.now();
         const messageDiv = this.createMessageElement(content, type, messageId, difyMessageId);
         this.chatMessages.appendChild(messageDiv);
+        if (type === 'bot') {
+            this.tryRenderChartForMessage(messageDiv, content, userQuestion);
+        }
         this.scrollToBottom();
         return messageId;
     }
@@ -968,6 +1481,7 @@ class ChatBot {
     }
     
     removeMessage(messageId) {
+        this.cleanupChartForMessage(messageId);
         const message = document.getElementById(messageId);
         if (message) {
             message.remove();
@@ -975,6 +1489,8 @@ class ChatBot {
     }
     
     clearChat() {
+        this.chartInstances.forEach((chart) => chart.destroy());
+        this.chartInstances.clear();
         this.chatMessages.innerHTML = '';
         this.conversationId = null;
         console.log('Started new conversation');
@@ -1196,7 +1712,7 @@ class ChatBot {
                     }
                     // 显示机器人回复
                     if (msg.answer) {
-                        this.addMessage(msg.answer, 'bot', this.getDifyMessageId(msg));
+                        this.addMessage(msg.answer, 'bot', this.getDifyMessageId(msg), msg.query || '');
                     }
                 });
             }
