@@ -1023,9 +1023,7 @@ body {
     .mes-table {
         font-size: 12px;
         margin: 12px 0;
-        display: block;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
+        display: table;
     }
     
     .mes-table thead,
@@ -1217,8 +1215,31 @@ body {
 }
 
 /* Enhanced MES Table Styles */
-.mes-table {
+.mes-table-wrapper {
     width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    margin: 12px 0;
+}
+
+.mes-table-wrapper::-webkit-scrollbar {
+    height: 8px;
+}
+
+.mes-table-wrapper::-webkit-scrollbar-track {
+    background: #f3f4f6;
+    border-radius: 4px;
+}
+
+.mes-table-wrapper::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, var(--red-1), var(--red-2));
+    border-radius: 4px;
+}
+
+.mes-table {
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     margin: 16px 0;
     background: #ffffff;

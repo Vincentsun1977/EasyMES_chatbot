@@ -172,6 +172,21 @@ class DifyClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+
+    def _format_exception(self, error: Exception) -> str:
+        """Format exception with fallback details when str(error) is empty."""
+        message = str(error).strip()
+        if not message:
+            message = repr(error)
+
+        cause = getattr(error, "__cause__", None)
+        if cause:
+            cause_message = str(cause).strip() or repr(cause)
+            message = f"{error.__class__.__name__}: {message}; cause={cause.__class__.__name__}: {cause_message}"
+        else:
+            message = f"{error.__class__.__name__}: {message}"
+
+        return message
     
     async def send_message(
         self,
@@ -200,7 +215,7 @@ class DifyClient:
             "user": user
         }
         
-        async with httpx.AsyncClient(timeout=60.0, verify=settings.VERIFY_SSL) as client:
+        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT_SECONDS, verify=settings.VERIFY_SSL) as client:
             try:
                 logger.info(f"Sending chat message to Dify: {json.dumps(payload, ensure_ascii=False)}")
                 response = await client.post(
@@ -324,7 +339,7 @@ class DifyClient:
             "user": user
         }
         
-        async with httpx.AsyncClient(timeout=120.0, verify=settings.VERIFY_SSL) as client:
+        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT_SECONDS, verify=settings.VERIFY_SSL) as client:
             try:
                 logger.info(f"=== DIFY STREAMING REQUEST ===")
                 logger.info(f"URL: {self.api_url}/chat-messages")
@@ -438,9 +453,10 @@ class DifyClient:
                     pass
                 raise Exception(error_msg)
             except Exception as e:
-                if "Dify API error" not in str(e):
-                    logger.error(f"Failed to stream from Dify API: {str(e)}")
-                raise Exception(f"Failed to stream from Dify API: {str(e)}")
+                detailed_error = self._format_exception(e)
+                if "Dify API error" not in detailed_error:
+                    logger.error(f"Failed to stream from Dify API: {detailed_error}", exc_info=True)
+                raise Exception(f"Failed to stream from Dify API: {detailed_error}")
     
     async def get_conversations(
         self, 

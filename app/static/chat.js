@@ -7,6 +7,8 @@ class ChatBot {
         this.conversationId = null;
         this.userId = this.generateUserId();
         this.isStreaming = false;
+        this.showAvatarUrlInBotReply = false; // 临时调试开关：在机器人回复中显示 avatar URL
+        this.avatarUpstreamUrlDebug = null;
         this.isWorkflowApp = false; // 标记是否为 workflow 应用
         this.abortController = null; // 用于中断请求
         this.chartInstances = new Map();
@@ -63,6 +65,11 @@ class ChatBot {
         
         // 移动端虚拟键盘处理
         this.handleMobileKeyboard();
+
+        // 调试：仅在开关打开时，获取后端最终头像 URL（从响应头读取）
+        if (this.showAvatarUrlInBotReply) {
+            this.resolveAvatarUpstreamUrlDebug();
+        }
         
         // 移动端触摸优化
         this.setupTouchOptimizations();
@@ -206,6 +213,39 @@ class ChatBot {
         const encodedEmployeeId = encodeURIComponent(employeeId);
         return `/api/v1/avatar?EmployeeId=${encodedEmployeeId}&avatarKey=${encodedEmployeeId}`;
     }
+
+    appendAvatarUrlDebug(content) {
+        const baseContent = String(content || '');
+        if (!this.showAvatarUrlInBotReply) {
+            return baseContent;
+        }
+        const proxyUrl = this.getUserAvatarUrl();
+        const upstreamUrl = this.avatarUpstreamUrlDebug || '(loading...)';
+        return `${baseContent}\n\n[DEBUG avatar_proxy_url] ${proxyUrl}\n[DEBUG avatar_upstream_url] ${upstreamUrl}`;
+    }
+
+    async resolveAvatarUpstreamUrlDebug() {
+        if (!this.showAvatarUrlInBotReply) {
+            return;
+        }
+
+        const proxyUrl = this.getUserAvatarUrl();
+        try {
+            const resp = await fetch(proxyUrl, {
+                method: 'GET',
+                cache: 'no-store',
+            });
+            const upstreamUrl = resp.headers.get('x-avatar-upstream-url');
+            if (upstreamUrl) {
+                this.avatarUpstreamUrlDebug = upstreamUrl;
+            } else {
+                this.avatarUpstreamUrlDebug = '(header missing)';
+            }
+        } catch (error) {
+            console.warn('[AvatarDebug] Failed to resolve upstream URL:', error);
+            this.avatarUpstreamUrlDebug = `(resolve failed: ${error?.message || 'unknown'})`;
+        }
+    }
     
     // 增强版 Markdown 转换为 HTML
     markdownToHtml(markdown) {
@@ -248,7 +288,7 @@ class ChatBot {
                 table += '</tr>';
             });
             table += '</tbody></table>';
-            return table;
+            return `<div class="mes-table-wrapper">${table}</div>`;
         });
         
         // 转换标题 ## text
@@ -546,6 +586,35 @@ class ChatBot {
         return result;
     }
 
+    isTotalLikeLabel(label) {
+        const normalized = String(label || '')
+            .toLowerCase()
+            .replace(/[\s_\-:：]/g, '');
+        return /(合计|总计|汇总|小计|total|sum|grandtotal)/i.test(normalized);
+    }
+
+    splitDisplayAndTotalPairs(pairs) {
+        const sourcePairs = Array.isArray(pairs) ? pairs : [];
+        const displayPairs = sourcePairs.filter(pair => !this.isTotalLikeLabel(pair.label));
+        const totalPairs = sourcePairs.filter(pair => this.isTotalLikeLabel(pair.label));
+
+        let percentBase = null;
+        for (const pair of totalPairs) {
+            const value = Number(pair.value);
+            if (Number.isFinite(value) && value > 0) {
+                percentBase = value;
+                break;
+            }
+        }
+
+        if (!Number.isFinite(percentBase)) {
+            const sum = displayPairs.reduce((acc, pair) => acc + (Number(pair.value) || 0), 0);
+            percentBase = sum > 0 ? sum : null;
+        }
+
+        return { displayPairs, percentBase };
+    }
+
     shouldGenerateChartForQuestion(question) {
         const source = String(question || '').toLowerCase();
         if (!source) {
@@ -609,34 +678,40 @@ class ChatBot {
 
         // 优先解析 markdown 表格
         const markdownPairs = this.extractPairsFromMarkdownTable(text);
-        if (markdownPairs.length >= 2) {
-            const data = markdownPairs.slice(0, 12);
+        const markdownResult = this.splitDisplayAndTotalPairs(markdownPairs);
+        if (markdownResult.displayPairs.length >= 2) {
+            const data = markdownResult.displayPairs.slice(0, 12);
             return {
                 chartType: this.inferChartType(text, data.map(pair => pair.label), data),
                 labels: data.map(pair => pair.label),
-                values: data.map(pair => pair.value)
+                values: data.map(pair => pair.value),
+                percentBase: markdownResult.percentBase
             };
         }
 
         // 解析已渲染的 HTML 表格
         const renderedTablePairs = this.extractPairsFromRenderedTable(messageDiv);
-        if (renderedTablePairs.length >= 2) {
-            const data = renderedTablePairs.slice(0, 12);
+        const renderedResult = this.splitDisplayAndTotalPairs(renderedTablePairs);
+        if (renderedResult.displayPairs.length >= 2) {
+            const data = renderedResult.displayPairs.slice(0, 12);
             return {
                 chartType: this.inferChartType(text, data.map(pair => pair.label), data),
                 labels: data.map(pair => pair.label),
-                values: data.map(pair => pair.value)
+                values: data.map(pair => pair.value),
+                percentBase: renderedResult.percentBase
             };
         }
 
         // 解析制表符/多空格列（视作纯文本表格）
         const structuredPairs = this.extractPairsFromStructuredRows(text);
-        if (structuredPairs.length >= 2) {
-            const data = structuredPairs.slice(0, 12);
+        const structuredResult = this.splitDisplayAndTotalPairs(structuredPairs);
+        if (structuredResult.displayPairs.length >= 2) {
+            const data = structuredResult.displayPairs.slice(0, 12);
             return {
                 chartType: this.inferChartType(text, data.map(pair => pair.label), data),
                 labels: data.map(pair => pair.label),
-                values: data.map(pair => pair.value)
+                values: data.map(pair => pair.value),
+                percentBase: structuredResult.percentBase
             };
         }
 
@@ -719,8 +794,9 @@ class ChatBot {
             return null;
         }
 
+        const splitResult = this.splitDisplayAndTotalPairs(pairs);
         const maxPoints = 12;
-        const normalized = pairs
+        const normalized = splitResult.displayPairs
             .filter(pair => pair.label && Number.isFinite(pair.value))
             .slice(0, maxPoints);
 
@@ -735,7 +811,8 @@ class ChatBot {
         return {
             chartType,
             labels,
-            values
+            values,
+            percentBase: splitResult.percentBase
         };
     }
 
@@ -868,21 +945,25 @@ class ChatBot {
         });
     }
 
-    renderNativePieChart(svg, labels, values, colors) {
+    renderNativePieChart(svg, labels, values, colors, percentBase = null) {
         const width = 360;
         const height = 180;
         const cx = 84;
         const cy = 90;
         const radius = 52;
-        const total = values.reduce((sum, value) => sum + value, 0);
-        if (total <= 0) {
+        const displayTotal = values.reduce((sum, value) => sum + value, 0);
+        if (displayTotal <= 0) {
             this.renderFallbackBarChart({ appendChild: (node) => svg.appendChild(node) }, { labels, values });
             return;
         }
 
+        const safePercentBase = Number.isFinite(percentBase) && percentBase > 0
+            ? Math.max(percentBase, displayTotal)
+            : displayTotal;
+
         let startAngle = -Math.PI / 2;
         values.forEach((value, index) => {
-            const angle = (value / total) * Math.PI * 2;
+            const angle = (value / displayTotal) * Math.PI * 2;
             const endAngle = startAngle + angle;
             const largeArc = angle > Math.PI ? 1 : 0;
             const x1 = cx + radius * Math.cos(startAngle);
@@ -916,7 +997,7 @@ class ChatBot {
                 rx: 2,
                 fill: colors[index % colors.length]
             }));
-            const percent = Math.round((values[index] / total) * 100);
+            const percent = Math.round((values[index] / safePercentBase) * 100);
             const legendText = `${label.length > 8 ? `${label.slice(0, 8)}…` : label} ${percent}%`;
             svg.appendChild(this.createSvgText(legendStartX + 16, y - 1, legendText, {
                 fontSize: 10,
@@ -938,7 +1019,7 @@ class ChatBot {
 
         const colors = ['#FF000F', '#FF4D5A', '#FF7A84', '#FCA5A5', '#FECACA', '#D1D5DB', '#9CA3AF', '#6B7280'];
         if (chartConfig.chartType === 'pie') {
-            this.renderNativePieChart(svg, chartConfig.labels, chartConfig.values, colors);
+            this.renderNativePieChart(svg, chartConfig.labels, chartConfig.values, colors, chartConfig.percentBase);
         } else if (chartConfig.chartType === 'line') {
             this.renderNativeLineChart(svg, chartConfig.labels, chartConfig.values, colors);
         } else {
@@ -1186,11 +1267,23 @@ class ChatBot {
         this.isStreaming = true;
         this.userStopped = false; // 重置停止标记
         this.abortController = new AbortController();
-        const typingId = document.querySelector('.typing-indicator')?.parentElement?.id;
+        const typingId = document.querySelector('.typing-indicator')?.closest('.message')?.id;
         let messageCreated = false;
         let messageDiv = null;
         let contentDiv = null;
         let difyMessageId = null;
+        let streamingUiReleased = false;
+        const flushUiFrame = async () => {
+            await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        };
+        const releaseStreamingUi = () => {
+            if (streamingUiReleased) {
+                return;
+            }
+            streamingUiReleased = true;
+            this.isStreaming = false;
+            this.updateSendButton(false);
+        };
         
         try {
             console.log('=== MAKING FETCH REQUEST ===');
@@ -1239,43 +1332,93 @@ class ChatBot {
                         const data = line.slice(6).trim();
                         console.log('[RAW DATA LINE]', data);
                         if (data) {
+                            let json = null;
                             try {
-                                const json = JSON.parse(data);
-                                console.log('=== Received event:', json.event, '===');
-                                console.log('[FULL JSON]', JSON.stringify(json, null, 2));
+                                json = JSON.parse(data);
+                            } catch (parseError) {
+                                console.warn('Failed to parse JSON:', data, parseError);
+                                continue;
+                            }
+
+                            console.log('=== Received event:', json.event, '===');
+                            console.log('[FULL JSON]', JSON.stringify(json, null, 2));
                                 
-                                // Handle chat message events
-                                if (json.event === 'message') {
-                                    console.log('[MESSAGE EVENT] Processing...');
-                                    // Get the answer from message data
-                                    const answer = json.answer || '';
-                                    console.log('[MESSAGE EVENT] Raw answer TYPE:', typeof answer);
-                                    console.log('[MESSAGE EVENT] Raw answer LENGTH:', answer.length);
-                                    console.log('[MESSAGE EVENT] Raw answer VALUE:', answer);
-                                    console.log('[MESSAGE EVENT] Raw answer CHAR CODES:', Array.from(answer).map((c, i) => `${i}:${c}(${c.charCodeAt(0)})`).join(' '));
+                            // Handle chat message events
+                            if (json.event === 'message') {
+                                console.log('[MESSAGE EVENT] Processing...');
+                                if (json.conversation_id) {
+                                    this.conversationId = json.conversation_id;
+                                    console.log('Updated conversation_id (from message):', this.conversationId);
+                                }
+                                // Get the answer from message data
+                                const answer = json.answer || '';
+                                console.log('[MESSAGE EVENT] Raw answer TYPE:', typeof answer);
+                                console.log('[MESSAGE EVENT] Raw answer LENGTH:', answer.length);
+                                console.log('[MESSAGE EVENT] Raw answer VALUE:', answer);
+                                console.log('[MESSAGE EVENT] Raw answer CHAR CODES:', Array.from(answer).map((c, i) => `${i}:${c}(${c.charCodeAt(0)})`).join(' '));
                                     
-                                    // Only process if answer is not empty (ignore empty message events from workflow apps)
-                                    if (answer) {
-                                        // Full message event - contains complete answer
+                                // Only process if answer is not empty (ignore empty message events from workflow apps)
+                                if (answer) {
+                                    // Full message event - contains complete answer
+                                    // 累加答案内容（流式传输）
+                                    fullAnswer += answer;
+                                    console.log('[MESSAGE EVENT] Accumulated answer length:', fullAnswer.length);
+                                    console.log('[MESSAGE EVENT] messageCreated:', messageCreated);
+                                    console.log('[MESSAGE EVENT] typingId:', typingId);
+                                    
+                                    // 确保只在有内容时才创建或更新消息
+                                    if (fullAnswer.trim()) {
                                         if (!messageCreated) {
+                                            console.log('[MESSAGE EVENT] Creating new message element...');
+                                            // 先移除打字指示器
                                             if (typingId) {
+                                                console.log('[MESSAGE EVENT] Removing typing indicator:', typingId);
                                                 this.removeMessage(typingId);
                                             }
-                                            const messageId = 'msg_' + Date.now();
-                                            messageDiv = this.createMessageElement('', 'bot', messageId);
-                                            this.chatMessages.appendChild(messageDiv);
-                                            contentDiv = messageDiv.querySelector('.message-content p');
-                                            messageCreated = true;
-                                            console.log('[MESSAGE EVENT] Created message element');
-                                        }
-                                        
-                                        if (contentDiv) {
-                                            // 累加答案内容（流式传输）
-                                            fullAnswer += answer;
-                                            console.log('[MESSAGE EVENT] Accumulated answer length:', fullAnswer.length);
                                             
-                                            // 格式化累加后的完整答案
-                                            const formattedAnswer = this.formatMesData(fullAnswer);
+                                            const messageId = 'msg_' + Date.now();
+                                            
+                                            // 格式化答案内容
+                                            const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
+                                            const renderedContent = this.markdownToHtml(formattedAnswer);
+                                            console.log('[MESSAGE EVENT] Rendered content length:', renderedContent.length);
+                                            
+                                            // 创建完整的消息元素（所有子元素都在添加到DOM前创建好）
+                                            messageDiv = document.createElement('div');
+                                            messageDiv.className = 'message bot-message';
+                                            messageDiv.id = messageId;
+                                            
+                                            const avatar = document.createElement('div');
+                                            avatar.className = 'message-avatar bot-avatar';
+                                            avatar.textContent = '小易';
+                                            
+                                            const contentDivElement = document.createElement('div');
+                                            contentDivElement.className = 'message-content';
+                                            contentDivElement.innerHTML = `<div class="markdown-body"><p>${renderedContent}</p></div>`;
+                                            
+                                            // 先添加免责声明
+                                            const disclaimer = document.createElement('div');
+                                            disclaimer.className = 'message-disclaimer';
+                                            disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
+                                            disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
+                                            contentDivElement.appendChild(disclaimer);
+                                            
+                                            messageDiv.appendChild(avatar);
+                                            messageDiv.appendChild(contentDivElement);
+                                            
+                                            // 添加反馈按钮（会在免责声明之前插入）
+                                            this.addFeedbackButtons(messageDiv);
+                                            
+                                            // 确保所有内容都准备好后再添加到DOM
+                                            console.log('[MESSAGE EVENT] Adding message to DOM...');
+                                            this.chatMessages.appendChild(messageDiv);
+                                            contentDiv = contentDivElement.querySelector('p');
+                                            messageCreated = true;
+                                            console.log('[MESSAGE EVENT] ✓ Message created and added to DOM');
+                                        } else if (contentDiv) {
+                                            console.log('[MESSAGE EVENT] Updating existing message...');
+                                            // 更新已存在的消息内容
+                                            const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
                                             
                                             // 使用 Markdown 渲染
                                             const markdownContainer = contentDiv.querySelector('.markdown-body p') || contentDiv.querySelector('p');
@@ -1284,8 +1427,11 @@ class ChatBot {
                                             } else {
                                                 contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(formattedAnswer)}</p></div>`;
                                             }
-                                            this.scrollToBottom();
+                                            console.log('[MESSAGE EVENT] ✓ Message updated');
                                         }
+                                        
+                                        this.scrollToBottom();
+                                        releaseStreamingUi();
 
                                         const eventMessageId = json.message_id || json.id || null;
                                         if (eventMessageId && eventMessageId !== difyMessageId) {
@@ -1293,78 +1439,138 @@ class ChatBot {
                                             this.setBotMessageId(messageDiv, difyMessageId);
                                         }
                                     } else {
-                                        console.log('[MESSAGE EVENT] Answer is empty - skipping (workflow app sends answer in workflow_finished)');
+                                        console.log('[MESSAGE EVENT] Answer is whitespace only, waiting for more content...');
                                     }
-                                } else if (json.event === 'workflow_finished') {
-                                    // Ignore workflow_finished - only use message event for Chat Message API
-                                    console.log('[WORKFLOW_FINISHED EVENT] Ignoring - only processing message events');
-                                } else if (json.event === 'message_end') {
-                                    // End of message - save conversation_id
-                                    if (json.conversation_id) {
-                                        this.conversationId = json.conversation_id;
-                                        console.log('Updated conversation_id:', this.conversationId);
-                                    }
-                                    const endMessageId = json.message_id || json.id || null;
-                                    if (endMessageId && endMessageId !== difyMessageId) {
-                                        difyMessageId = endMessageId;
-                                        this.setBotMessageId(messageDiv, difyMessageId);
-                                    }
-                                } else if (json.event === 'agent_message' || json.event === 'text_chunk') {
-                                    console.log('[AGENT_MESSAGE/TEXT_CHUNK EVENT] Processing...');
-                                    // Streaming text chunks - accumulate content
-                                    if (!messageCreated) {
-                                        if (typingId) {
-                                            this.removeMessage(typingId);
-                                        }
-                                        const messageId = 'msg_' + Date.now();
-                                        messageDiv = this.createMessageElement('', 'bot', messageId);
-                                        this.chatMessages.appendChild(messageDiv);
-                                        contentDiv = messageDiv.querySelector('.message-content p');
-                                        messageCreated = true;
-                                        console.log('[AGENT_MESSAGE/TEXT_CHUNK EVENT] Created message element');
-                                    }
-                                    
-                                    // Append streaming text if available
-                                    if (json.data && contentDiv) {
-                                        const chunkText = json.data.text || json.data.answer || json.data;
-                                        if (typeof chunkText === 'string') {
-                                            fullAnswer += chunkText;
-                                            
-                                            // Update display with accumulated content
-                                            const formattedAnswer = this.formatMesData(fullAnswer);
-                                            const markdownContainer = contentDiv.querySelector('.markdown-body p') || contentDiv.querySelector('p');
-                                            if (markdownContainer) {
-                                                markdownContainer.innerHTML = this.markdownToHtml(formattedAnswer);
-                                            } else {
-                                                contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(formattedAnswer)}</p></div>`;
-                                            }
-                                            this.scrollToBottom();
-                                        }
-                                    }
-                                } else if (json.event === 'workflow_finished') {
-                                    // 忽略 workflow_finished 事件，因为使用的是 Chat Message API
-                                    // message 事件已经包含了完整答案
-                                    console.log('[WORKFLOW_FINISHED EVENT] Ignored - using message event instead');
-                                } else if (json.event === 'node_finished') {
-                                    // 忽略 node_finished 事件
-                                    console.log('[NODE_FINISHED EVENT] Ignored');
-                                } else if (json.event === 'workflow_started' || json.event === 'node_started') {
-                                    // 忽略 workflow/node started 事件
-                                    console.log('[' + json.event.toUpperCase() + ' EVENT] Ignored');
-                                } else if (json.error) {
-                                    // Error event
-                                    throw new Error(json.error);
+
                                 } else {
-                                    // Unknown event, log it
-                                    console.log('Unknown event:', json.event, json);
+                                    console.log('[MESSAGE EVENT] Answer is empty - skipping (workflow app sends answer in workflow_finished)');
                                 }
-                            } catch (e) {
-                                console.warn('Failed to parse JSON:', data, e);
+                            } else if (json.event === 'workflow_finished') {
+                                // Ignore workflow_finished - only use message event for Chat Message API
+                                console.log('[WORKFLOW_FINISHED EVENT] Ignoring - only processing message events');
+                            } else if (json.event === 'message_end') {
+                                // End of message - save conversation_id
+                                if (json.conversation_id) {
+                                    this.conversationId = json.conversation_id;
+                                    console.log('Updated conversation_id:', this.conversationId);
+                                }
+                                const endMessageId = json.message_id || json.id || null;
+                                if (endMessageId && endMessageId !== difyMessageId) {
+                                    difyMessageId = endMessageId;
+                                    this.setBotMessageId(messageDiv, difyMessageId);
+                                }
+                            } else if (json.event === 'agent_message' || json.event === 'text_chunk') {
+                                console.log('[AGENT_MESSAGE/TEXT_CHUNK EVENT] Processing...');
+                                // Streaming text chunks - accumulate content
+                                
+                                // Append streaming text if available
+                                if (json.data) {
+                                    const chunkText = json.data.text || json.data.answer || json.data;
+                                    if (typeof chunkText === 'string' && chunkText) {
+                                        fullAnswer += chunkText;
+                                        console.log('[AGENT_MESSAGE/TEXT_CHUNK] Accumulated length:', fullAnswer.length);
+                                        console.log('[AGENT_MESSAGE/TEXT_CHUNK] messageCreated:', messageCreated);
+                                        
+                                        // 确保只在有内容时才创建或更新消息
+                                        if (fullAnswer.trim()) {
+                                            if (!messageCreated) {
+                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Creating new message...');
+                                                // 先移除打字指示器
+                                                if (typingId) {
+                                                    console.log('[AGENT_MESSAGE/TEXT_CHUNK] Removing typing indicator:', typingId);
+                                                    this.removeMessage(typingId);
+                                                }
+                                                
+                                                const messageId = 'msg_' + Date.now();
+                                                
+                                                // 格式化答案内容
+                                                const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
+                                                const renderedContent = this.markdownToHtml(formattedAnswer);
+                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Rendered content length:', renderedContent.length);
+                                                
+                                                // 创建完整的消息元素
+                                                messageDiv = document.createElement('div');
+                                                messageDiv.className = 'message bot-message';
+                                                messageDiv.id = messageId;
+                                                
+                                                const avatar = document.createElement('div');
+                                                avatar.className = 'message-avatar bot-avatar';
+                                                avatar.textContent = '小易';
+                                                
+                                                const contentDivElement = document.createElement('div');
+                                                contentDivElement.className = 'message-content';
+                                                contentDivElement.innerHTML = `<div class="markdown-body"><p>${renderedContent}</p></div>`;
+                                                
+                                                // 先添加免责声明
+                                                const disclaimer = document.createElement('div');
+                                                disclaimer.className = 'message-disclaimer';
+                                                disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
+                                                disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
+                                                contentDivElement.appendChild(disclaimer);
+                                                
+                                                messageDiv.appendChild(avatar);
+                                                messageDiv.appendChild(contentDivElement);
+                                                
+                                                // 添加反馈按钮（会在免责声明之前插入）
+                                                this.addFeedbackButtons(messageDiv);
+                                                
+                                                // 确保所有内容都准备好后再添加到DOM
+                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Adding message to DOM...');
+                                                this.chatMessages.appendChild(messageDiv);
+                                                contentDiv = contentDivElement.querySelector('p');
+                                                messageCreated = true;
+                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] ✓ Message created and added to DOM');
+                                            } else if (contentDiv) {
+                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Updating existing message...');
+                                                // Update display with accumulated content
+                                                const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
+                                                const markdownContainer = contentDiv.querySelector('.markdown-body p') || contentDiv.querySelector('p');
+                                                if (markdownContainer) {
+                                                    markdownContainer.innerHTML = this.markdownToHtml(formattedAnswer);
+                                                } else {
+                                                    contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(formattedAnswer)}</p></div>`;
+                                                }
+                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] ✓ Message updated');
+                                            }
+                                            
+                                            this.scrollToBottom();
+                                            releaseStreamingUi();
+                                        } else {
+                                            console.log('[AGENT_MESSAGE/TEXT_CHUNK] Content is whitespace only, waiting...');
+                                        }
+                                    }
+                                }
+                            } else if (json.event === 'workflow_finished') {
+                                // 忽略 workflow_finished 事件，因为使用的是 Chat Message API
+                                // message 事件已经包含了完整答案
+                                console.log('[WORKFLOW_FINISHED EVENT] Ignored - using message event instead');
+                            } else if (json.event === 'node_finished') {
+                                // 忽略 node_finished 事件
+                                console.log('[NODE_FINISHED EVENT] Ignored');
+                            } else if (json.event === 'workflow_started' || json.event === 'node_started') {
+                                // 忽略 workflow/node started 事件
+                                console.log('[' + json.event.toUpperCase() + ' EVENT] Ignored');
+                            } else if (json.event === 'ping') {
+                                // Heartbeat event, keep stream alive
+                                console.debug('[PING EVENT] Keep-alive heartbeat');
+                            } else if (json.event === 'error' || json.error) {
+                                // Structured error event from backend
+                                const streamError = new Error(json.user_message || json.error || '请求失败');
+                                streamError.errorType = json.error_type || 'unknown';
+                                streamError.rawError = json.error || '';
+                                throw streamError;
+                            } else {
+                                // Unknown event, log it
+                                console.log('Unknown event:', json.event, json);
                             }
                         }
                     }
                 }
+
             }
+
+            releaseStreamingUi();
+            await flushUiFrame();
             
             // Remove typing indicator if still present
             const remainingTyping = document.querySelector('.typing-indicator');
@@ -1381,19 +1587,18 @@ class ChatBot {
             if (!fullAnswer) {
                 console.log('[LOOP END] No content received, creating error message');
                 if (!messageCreated) {
+                    // 直接创建带有错误文本的消息，不要先创建空消息
                     const messageId = 'msg_' + Date.now();
-                    messageDiv = this.createMessageElement('', 'bot', messageId);
+                    messageDiv = this.createMessageElement('抱歉，没有收到响应。', 'bot', messageId);
                     this.chatMessages.appendChild(messageDiv);
-                    contentDiv = messageDiv.querySelector('.message-content p');
-                    console.log('[LOOP END] Created error message element');
-                }
-                if (contentDiv) {
+                    console.log('[LOOP END] Created error message element with text');
+                } else if (contentDiv) {
                     contentDiv.textContent = '抱歉，没有收到响应。';
                 }
             } else {
                 console.log('[LOOP END] Content received, no error message needed');
                 if (messageDiv) {
-                    const formattedAnswer = this.formatMesData(fullAnswer);
+                    const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
                     this.tryRenderChartForMessage(messageDiv, formattedAnswer, query);
                 }
                 
@@ -1402,6 +1607,7 @@ class ChatBot {
             }
             
         } catch (error) {
+            releaseStreamingUi();
             // 如果是用户主动中断，显示停止消息
             if (error.name === 'AbortError') {
                 console.log('Request aborted by user');
@@ -1441,19 +1647,45 @@ class ChatBot {
                 // Show error message
                 if (!messageCreated) {
                     const messageId = 'msg_' + Date.now();
-                    messageDiv = this.createMessageElement('', 'bot', messageId);
+                    const rawMessage = String(error?.message || '');
+                    let displayMessage = `抱歉，发生了错误：${rawMessage}`;
+
+                    if (error?.errorType === 'gateway_timeout') {
+                        displayMessage = '抱歉，请求超时（可能是网关超时），请稍后重试。';
+                    } else if (
+                        error?.errorType === 'network_error' ||
+                        /failed to fetch|network\s*error|networkerror|load failed/i.test(rawMessage)
+                    ) {
+                        displayMessage = '抱歉，网络连接异常，请检查网络后重试。';
+                    } else if (error?.errorType === 'dify_api_error') {
+                        displayMessage = '抱歉，Dify 服务返回异常，请稍后重试。';
+                    }
+
+                    // 直接创建带有错误文本的消息，不要先创建空消息
+                    messageDiv = this.createMessageElement(displayMessage, 'bot', messageId);
                     this.chatMessages.appendChild(messageDiv);
-                    contentDiv = messageDiv.querySelector('.message-content p');
-                }
-                if (contentDiv) {
-                    contentDiv.textContent = `抱歉，发生了错误：${error.message}`;
+                } else if (contentDiv) {
+                    const rawMessage = String(error?.message || '');
+                    let displayMessage = `抱歉，发生了错误：${rawMessage}`;
+
+                    if (error?.errorType === 'gateway_timeout') {
+                        displayMessage = '抱歉，请求超时（可能是网关超时），请稍后重试。';
+                    } else if (
+                        error?.errorType === 'network_error' ||
+                        /failed to fetch|network\s*error|networkerror|load failed/i.test(rawMessage)
+                    ) {
+                        displayMessage = '抱歉，网络连接异常，请检查网络后重试。';
+                    } else if (error?.errorType === 'dify_api_error') {
+                        displayMessage = '抱歉，Dify 服务返回异常，请稍后重试。';
+                    }
+
+                    contentDiv.textContent = displayMessage;
                 }
                 this.addDisclaimerToLatestBotMessage();
             }
         } finally {
-            this.isStreaming = false;
+            releaseStreamingUi();
             this.abortController = null;
-            this.updateSendButton(false);
         }
     }
     
@@ -1634,6 +1866,95 @@ class ChatBot {
         messageDiv.appendChild(type === 'user' && userBody ? userBody : contentDiv);
         
         return messageDiv;
+    }
+
+    addFeedbackButtons(messageDiv, difyMessageId = null) {
+        if (!messageDiv) return;
+        
+        // 查找或创建内容容器
+        let contentDiv = messageDiv.querySelector('.message-content');
+        if (!contentDiv) return;
+        
+        // 检查是否已经有反馈按钮
+        if (contentDiv.querySelector('.message-feedback-actions')) {
+            return;
+        }
+        
+        const feedbackWrap = document.createElement('div');
+        feedbackWrap.className = 'message-feedback-actions';
+
+        const likeBtn = document.createElement('button');
+        likeBtn.type = 'button';
+        likeBtn.className = 'message-like-btn';
+        likeBtn.title = '点赞';
+        likeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-1 7v13h9a2 2 0 0 0 2-2l1-7a2 2 0 0 0-2-2h-6z"/><path d="M7 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h3"/></svg>';
+
+        const dislikeBtn = document.createElement('button');
+        dislikeBtn.type = 'button';
+        dislikeBtn.className = 'message-dislike-btn';
+        dislikeBtn.title = '点踩';
+        dislikeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l1-7V2H5a2 2 0 0 0-2 2l-1 7a2 2 0 0 0 2 2h6z"/><path d="M17 2h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3"/></svg>';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'message-copy-btn';
+        copyBtn.title = '复制回复';
+        copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+        likeBtn.disabled = !difyMessageId;
+        dislikeBtn.disabled = !difyMessageId;
+
+        const submitFeedback = async (targetRating) => {
+            const messageFeedbackId = messageDiv.dataset.difyMessageId;
+            if (!messageFeedbackId || likeBtn.disabled || dislikeBtn.disabled) {
+                return;
+            }
+
+            const currentRating = messageDiv.dataset.feedbackRating || '';
+            const nextRating = currentRating === targetRating ? null : targetRating;
+
+            likeBtn.disabled = true;
+            dislikeBtn.disabled = true;
+            try {
+                await this.sendMessageFeedback(messageFeedbackId, nextRating, '');
+                this.setFeedbackState(messageDiv, nextRating);
+            } catch (error) {
+                console.error('Feedback failed:', error);
+                alert('反馈失败，请重试');
+            } finally {
+                likeBtn.disabled = false;
+                dislikeBtn.disabled = false;
+            }
+        };
+
+        likeBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await submitFeedback('like');
+        });
+
+        dislikeBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await submitFeedback('dislike');
+        });
+
+        copyBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const markdownBody = messageDiv.querySelector('.markdown-body');
+            const replyText = markdownBody ? markdownBody.textContent.trim() : '';
+            await this.copyText(replyText);
+        });
+
+        feedbackWrap.appendChild(likeBtn);
+        feedbackWrap.appendChild(dislikeBtn);
+        feedbackWrap.appendChild(copyBtn);
+        
+        // 在免责声明之前插入反馈按钮
+        const disclaimer = contentDiv.querySelector('.message-disclaimer');
+        if (disclaimer) {
+            contentDiv.insertBefore(feedbackWrap, disclaimer);
+        } else {
+            contentDiv.appendChild(feedbackWrap);
+        }
     }
 
     setBotMessageId(messageDiv, difyMessageId) {

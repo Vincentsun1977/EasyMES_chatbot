@@ -1,4 +1,5 @@
 """Chat API endpoints."""
+import asyncio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from app.models.schemas import ChatRequest, ChatResponse, ErrorResponse, ConversationDeleteRequest, MessageFeedbackRequest
@@ -8,6 +9,74 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+STREAM_HEARTBEAT_INTERVAL_SECONDS = 15
+
+
+def build_stream_error_payload(error_msg: str) -> dict:
+    """Build structured stream error payload for frontend classification."""
+    lower_msg = str(error_msg).lower()
+
+    if (
+        "settings" in lower_msg
+        or "has no attribute" in lower_msg
+        or "attributeerror" in lower_msg
+        or "missing" in lower_msg
+        or "configuration" in lower_msg
+    ):
+        return {
+            "event": "error",
+            "error": error_msg,
+            "error_type": "config_error",
+            "user_message": "服务配置异常，请联系管理员检查配置。",
+        }
+
+    if (
+        "gateway" in lower_msg
+        or "504" in lower_msg
+        or "timed out" in lower_msg
+        or "timeout" in lower_msg
+        or "read timeout" in lower_msg
+        or "remoteprotocolerror" in lower_msg
+        or "http2" in lower_msg
+        or "protocol error" in lower_msg
+    ):
+        return {
+            "event": "error",
+            "error": error_msg,
+            "error_type": "gateway_timeout",
+            "user_message": "请求超时（可能是网关超时），请稍后重试。",
+        }
+
+    if (
+        "failed to fetch" in lower_msg
+        or "network" in lower_msg
+        or "connection" in lower_msg
+        or "connecterror" in lower_msg
+        or "readerror" in lower_msg
+        or "server disconnected" in lower_msg
+    ):
+        return {
+            "event": "error",
+            "error": error_msg,
+            "error_type": "network_error",
+            "user_message": "网络连接异常，请检查网络后重试。",
+        }
+
+    if "dify api error" in lower_msg:
+        return {
+            "event": "error",
+            "error": error_msg,
+            "error_type": "dify_api_error",
+            "user_message": "Dify 服务返回异常，请稍后重试。",
+        }
+
+    return {
+        "event": "error",
+        "error": error_msg,
+        "error_type": "unknown",
+        "user_message": f"发生错误：{error_msg}",
+    }
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -68,24 +137,61 @@ async def chat_stream(request: ChatRequest):
     
     async def event_generator():
         chunk_count = 0
+        queue: asyncio.Queue = asyncio.Queue()
+        stream_done = asyncio.Event()
+
+        async def producer():
+            nonlocal chunk_count
+            try:
+                async for chunk in dify_client.stream_message(
+                    query=request.query,
+                    user=request.user,
+                    conversation_id=request.conversation_id,
+                    inputs=request.inputs
+                ):
+                    chunk_count += 1
+                    logger.info(f"=== STREAM CHUNK {chunk_count} ===")
+                    logger.info(f"Chunk: {chunk}")
+                    await queue.put(("chunk", chunk))
+            except Exception as e:
+                await queue.put(("error", e))
+            finally:
+                stream_done.set()
+
+        producer_task = asyncio.create_task(producer())
+
         try:
-            async for chunk in dify_client.stream_message(
-                query=request.query,
-                user=request.user,
-                conversation_id=request.conversation_id,
-                inputs=request.inputs
-            ):
-                chunk_count += 1
-                logger.info(f"=== STREAM CHUNK {chunk_count} ===")
-                logger.info(f"Chunk: {chunk}")
-                # Forward the SSE event
-                yield f"data: {chunk}\n\n"
+            while True:
+                if stream_done.is_set() and queue.empty():
+                    break
+
+                try:
+                    kind, payload = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=STREAM_HEARTBEAT_INTERVAL_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    heartbeat_data = json.dumps({"event": "ping"})
+                    yield f"data: {heartbeat_data}\n\n"
+                    continue
+
+                if kind == "chunk":
+                    yield f"data: {payload}\n\n"
+                elif kind == "error":
+                    raise payload
         except Exception as e:
-            error_msg = str(e)
+            error_msg = str(e).strip() or repr(e)
             logger.error(f"Stream error: {error_msg}")
             logger.error(f"Full error details: {repr(e)}")
-            error_data = json.dumps({"error": error_msg})
+            error_data = json.dumps(build_stream_error_payload(error_msg), ensure_ascii=False)
             yield f"data: {error_data}\n\n"
+        finally:
+            if not producer_task.done():
+                producer_task.cancel()
+                try:
+                    await producer_task
+                except asyncio.CancelledError:
+                    pass
     
     return StreamingResponse(
         event_generator(),

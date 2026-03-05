@@ -10,14 +10,21 @@ class Settings(BaseSettings):
     DIFY_API_URL: str = "https://test.nas-save.abb.com/v1"
     DIFY_API_KEY: str
     VERIFY_SSL: bool = False  # Set to False to disable SSL verification for self-signed certificates
+    DIFY_TIMEOUT_SECONDS: float = 120.0
     
     # Application Configuration
     APP_HOST: str = "0.0.0.0"
-    APP_PORT: int = 8000
+    APP_PORT: int = 8010
     APP_DEBUG: bool = False
     
     # CORS Configuration
     ALLOWED_ORIGINS: str = "*"
+
+    # Avatar OData Proxy Configuration
+    ODATA_BASE_URL: str = "https://nas-fiori.abb.com/sap/opu/odata/sap/ZHR_EMP_TERM_SRV"
+    BASIC_USERNAME: str = ""
+    BASIC_PASSWORD: str = ""
+    REQUEST_TIMEOUT: int = 600
     
     class Config:
         env_file = ".env"
