@@ -4,6 +4,13 @@ console.log('Current timestamp:', new Date().toISOString());
 
 class ChatBot {
     constructor() {
+        this.sectionHeadingWhitelist = [
+            '总体概览',
+            '关键指标',
+            '异常提示',
+            '建议操作',
+            '具体明细'
+        ];
         this.conversationId = null;
         this.userId = this.generateUserId();
         this.isStreaming = false;
@@ -12,6 +19,7 @@ class ChatBot {
         this.isWorkflowApp = false; // 标记是否为 workflow 应用
         this.abortController = null; // 用于中断请求
         this.chartInstances = new Map();
+        this.chartModal = null;
         
         // DOM elements
         this.chatMessages = document.getElementById('chatMessages');
@@ -25,8 +33,15 @@ class ChatBot {
         this.sidebar = document.getElementById('sidebar');
         this.sidebarOverlay = document.getElementById('sidebarOverlay');
         this.closeSidebar = document.getElementById('closeSidebar');
+        this.multiSelectBtn = document.getElementById('multiSelectBtn');
+        this.bulkActionsBar = document.getElementById('conversationBulkActions');
+        this.bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+        this.cancelMultiSelectBtn = document.getElementById('cancelMultiSelectBtn');
+        this.selectedCountText = document.getElementById('selectedCountText');
         this.conversationList = document.getElementById('conversationList');
         this.activeConversationMenu = null;
+        this.isMultiSelectMode = false;
+        this.selectedConversationIds = new Set();
         
         this.init();
     }
@@ -48,6 +63,15 @@ class ChatBot {
         this.menuBtn.addEventListener('click', () => this.openSidebar());
         this.closeSidebar.addEventListener('click', () => this.closeSidebarPanel());
         this.sidebarOverlay.addEventListener('click', () => this.closeSidebarPanel());
+        if (this.multiSelectBtn) {
+            this.multiSelectBtn.addEventListener('click', () => this.toggleMultiSelectMode());
+        }
+        if (this.bulkDeleteBtn) {
+            this.bulkDeleteBtn.addEventListener('click', () => this.handleBulkDeleteConversations());
+        }
+        if (this.cancelMultiSelectBtn) {
+            this.cancelMultiSelectBtn.addEventListener('click', () => this.toggleMultiSelectMode(false));
+        }
         document.addEventListener('click', () => this.closeAllConversationMenus());
         
         // Auto-resize textarea
@@ -306,19 +330,25 @@ class ChatBot {
         html = this.linkifyUrls(html);
         
         // 转换有序列表 1. text (必须是行首，且点后有空格)
+        // 先去掉列表项之间的空行，避免空行被转成 <br> 残留
+        html = html.replace(/\n\n(- )/g, '\n$1');
+        html = html.replace(/\n\n(\d+\. )/g, '\n$1');
         html = html.replace(/^(\d+)\.\s+(.+)$/gm, '<li class="ordered">$2</li>');
         if (html.includes('<li class="ordered">')) {
             html = html.replace(/(<li class="ordered">.*<\/li>\n?)+/g, (match) => `<ol>${match.replace(/ class="ordered"/g, '')}</ol>`);
         }
         
-        // 转换无序列表 - text
-        html = html.replace(/^- (.+)$/gm, '<li class="unordered">$1</li>');
-        if (html.includes('<li class="unordered">')) {
-            html = html.replace(/(<li class="unordered">.*<\/li>\n?)+/g, (match) => `<ul>${match.replace(/ class="unordered"/g, '')}</ul>`);
-        }
+        // 转换无序列表，支持缩进的子列表
+        html = this.renderUnorderedLists(html);
         
         // 转换换行符
         html = html.replace(/\n/g, '<br>');
+        
+        // 清理多余的 <br>：块级元素前后的 <br> 去掉，多个连续 <br> 合并为一个
+        const blockTags = 'ul|ol|li|h1|h2|h3|blockquote|pre|div|table|tr|thead|tbody';
+        html = html.replace(new RegExp(`(<br>)+(<\/?(?:${blockTags})[^>]*>)`, 'g'), '$2');
+        html = html.replace(new RegExp(`(<\/?(?:${blockTags})[^>]*>)(<br>)+`, 'g'), '$1');
+        html = html.replace(/(<br>){2,}/g, '<br>');
         
         // 恢复 HTML 标签
         preservedTags.forEach((tag, index) => {
@@ -327,6 +357,7 @@ class ChatBot {
 
         // 对回复中的关键数字加粗
         html = this.emphasizeKeyNumbersInHtml(html);
+        html = this.enhanceReplySections(html);
         
         return html;
     }
@@ -383,6 +414,305 @@ class ChatBot {
                 });
             })
             .join('');
+    }
+
+    renderUnorderedLists(text) {
+        const lines = String(text || '').split('\n');
+        const result = [];
+        const indentStack = [];
+        const openLiStack = [];
+
+        const closeListItemAtLevel = (level) => {
+            if (openLiStack[level]) {
+                result.push('</li>');
+                openLiStack[level] = false;
+            }
+        };
+
+        const closeListsUntilIndent = (indent) => {
+            while (indentStack.length && indentStack[indentStack.length - 1] > indent) {
+                const level = indentStack.length - 1;
+                closeListItemAtLevel(level);
+                result.push('</ul>');
+                indentStack.pop();
+                openLiStack.pop();
+            }
+        };
+
+        lines.forEach((line) => {
+            const match = line.match(/^(\s*)-\s+(.+)$/);
+            if (!match) {
+                closeListsUntilIndent(-1);
+                if (line) {
+                    result.push(line);
+                }
+                return;
+            }
+
+            const indent = match[1].replace(/\t/g, '    ').length;
+            const content = match[2].trim();
+            if (!content) {
+                return;
+            }
+
+            closeListsUntilIndent(indent);
+
+            if (!indentStack.length || indent > indentStack[indentStack.length - 1]) {
+                result.push('<ul>');
+                indentStack.push(indent);
+                openLiStack.push(false);
+            } else {
+                closeListItemAtLevel(indentStack.length - 1);
+            }
+
+            result.push(`<li>${content}`);
+            openLiStack[indentStack.length - 1] = true;
+        });
+
+        closeListsUntilIndent(-1);
+        return result.join('\n');
+    }
+
+    enhanceReplySections(html) {
+        if (!html || (!html.includes('<ul>') && !html.includes('<ol>'))) {
+            return html;
+        }
+
+        const root = document.createElement('div');
+        root.innerHTML = html;
+
+        this.promoteInlineTextToSectionHeading(root);
+        this.wrapReplySections(root);
+        this.updateSectionDividerState(root);
+
+        return root.innerHTML;
+    }
+
+    promoteInlineTextToSectionHeading(root) {
+        const fragment = document.createDocumentFragment();
+        let pendingNodes = [];
+
+        const flushPendingNodes = () => {
+            pendingNodes.forEach((node) => fragment.appendChild(node));
+            pendingNodes = [];
+        };
+
+        Array.from(root.childNodes).forEach((node) => {
+            if (node.nodeType === Node.TEXT_NODE || (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR')) {
+                pendingNodes.push(node);
+                return;
+            }
+
+            if (node.nodeType === Node.ELEMENT_NODE && /^(UL|OL)$/.test(node.tagName)) {
+                const headingText = this.extractSectionHeadingText(pendingNodes);
+                if (headingText) {
+                    pendingNodes = [];
+                    const heading = document.createElement('h3');
+                    heading.className = 'markdown-h3 markdown-section-heading markdown-auto-heading';
+                    heading.textContent = this.formatSectionHeadingText(headingText);
+                    fragment.appendChild(heading);
+                    fragment.appendChild(node);
+                    return;
+                }
+            }
+
+            flushPendingNodes();
+            fragment.appendChild(node);
+        });
+
+        flushPendingNodes();
+        root.innerHTML = '';
+        root.appendChild(fragment);
+    }
+
+    extractSectionHeadingText(nodes) {
+        if (!nodes || !nodes.length) {
+            return null;
+        }
+
+        const lines = [];
+        let currentLine = '';
+
+        nodes.forEach((node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                currentLine += node.textContent || '';
+                return;
+            }
+
+            if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+                lines.push(currentLine.trim());
+                currentLine = '';
+            }
+        });
+
+        lines.push(currentLine.trim());
+
+        const meaningfulLines = lines
+            .map((line) => line.replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+
+        if (!meaningfulLines.length || meaningfulLines.length > 2) {
+            return null;
+        }
+
+        if (meaningfulLines.length === 2 && !this.isLikelyHeadingLeadIn(meaningfulLines[0])) {
+            return null;
+        }
+
+        const candidate = meaningfulLines[meaningfulLines.length - 1];
+        if (!candidate || candidate.length > 48) {
+            return null;
+        }
+
+        if (/[。！？!?]$/.test(candidate) && !/[：:]$/.test(candidate)) {
+            return null;
+        }
+
+        if (!this.isWhitelistedSectionHeading(candidate)) {
+            return null;
+        }
+
+        return candidate.replace(/[：:]\s*$/, '').trim() || null;
+    }
+
+    isWhitelistedSectionHeading(text) {
+        const normalized = String(text || '')
+            .replace(/[：:]/g, '')
+            .replace(/[()（）\[\]【】]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (!normalized) {
+            return false;
+        }
+
+        return this.sectionHeadingWhitelist.some((keyword) => normalized.includes(keyword));
+    }
+
+    isLikelyHeadingLeadIn(text) {
+        const normalized = String(text || '').trim();
+        if (!normalized) {
+            return false;
+        }
+
+        if (normalized.length > 24) {
+            return false;
+        }
+
+        return /[：:]$/.test(normalized);
+    }
+
+    formatSectionHeadingText(text) {
+        return String(text || '')
+            .replace(/\s+/g, ' ')
+            .replace(/(?<=[\u4e00-\u9fff]) (?=[\u4e00-\u9fff(（\dA-Za-z])/g, '\u00A0')
+            .replace(/(?<=[(（\dA-Za-z]) (?=[\u4e00-\u9fff])/g, '\u00A0')
+            .trim();
+    }
+
+    wrapReplySections(root) {
+        const fragment = document.createDocumentFragment();
+        const children = Array.from(root.childNodes);
+
+        for (let index = 0; index < children.length; index += 1) {
+            const node = children[index];
+
+            if (this.isReplyHeadingElement(node)) {
+                const listIndex = this.findNextListIndex(children, index + 1);
+                if (listIndex !== -1) {
+                    const section = document.createElement('div');
+                    section.className = 'markdown-section';
+                    section.appendChild(node);
+                    section.appendChild(children[listIndex]);
+                    fragment.appendChild(section);
+                    index = listIndex;
+                    continue;
+                }
+            }
+
+            if (this.isReplyListElement(node)) {
+                const section = document.createElement('div');
+                section.className = 'markdown-section markdown-section-list-only';
+                section.appendChild(node);
+                fragment.appendChild(section);
+                continue;
+            }
+
+            if (this.isIgnorableSpacingNode(node)) {
+                continue;
+            }
+
+            fragment.appendChild(node);
+        }
+
+        root.innerHTML = '';
+        root.appendChild(fragment);
+    }
+
+    updateSectionDividerState(root) {
+        const sections = Array.from(root.children).filter((node) =>
+            node.nodeType === Node.ELEMENT_NODE && node.classList.contains('markdown-section')
+        );
+
+        sections.forEach((section, index) => {
+            section.classList.remove('markdown-section-has-divider');
+
+            if (!section.classList.contains('markdown-section-list-only')) {
+                return;
+            }
+
+            const hasFollowingContent = sections.slice(index + 1).some((nextSection) => {
+                return this.hasMeaningfulSectionContent(nextSection);
+            });
+
+            if (hasFollowingContent) {
+                section.classList.add('markdown-section-has-divider');
+            }
+        });
+    }
+
+    hasMeaningfulSectionContent(section) {
+        if (!section) {
+            return false;
+        }
+
+        const text = (section.textContent || '').replace(/\s+/g, '').trim();
+        return Boolean(text);
+    }
+
+    isReplyHeadingElement(node) {
+        return !!(node && node.nodeType === Node.ELEMENT_NODE && /^(H1|H2|H3)$/.test(node.tagName));
+    }
+
+    isReplyListElement(node) {
+        return !!(node && node.nodeType === Node.ELEMENT_NODE && /^(UL|OL)$/.test(node.tagName));
+    }
+
+    isIgnorableSpacingNode(node) {
+        if (!node) {
+            return true;
+        }
+
+        if (node.nodeType === Node.TEXT_NODE) {
+            return !(node.textContent || '').trim();
+        }
+
+        return node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR';
+    }
+
+    findNextListIndex(children, startIndex) {
+        for (let index = startIndex; index < children.length; index += 1) {
+            const node = children[index];
+            if (this.isReplyListElement(node)) {
+                return index;
+            }
+
+            if (!this.isIgnorableSpacingNode(node)) {
+                return -1;
+            }
+        }
+
+        return -1;
     }
     
     // HTML转义函数
@@ -1007,12 +1337,13 @@ class ChatBot {
         });
     }
 
-    renderNativeChart(chartWrapper, chartConfig) {
+    renderNativeChart(chartWrapper, chartConfig, options = {}) {
+        const expanded = !!options.expanded;
         const chartBody = document.createElement('div');
-        chartBody.className = 'message-chart-body';
+        chartBody.className = expanded ? 'message-chart-body chart-modal-body' : 'message-chart-body';
 
         const svg = this.createSvgElement('svg', {
-            class: 'message-chart-svg',
+            class: expanded ? 'message-chart-svg chart-modal-svg' : 'message-chart-svg',
             viewBox: '0 0 360 180',
             preserveAspectRatio: 'none'
         });
@@ -1028,6 +1359,114 @@ class ChatBot {
 
         chartBody.appendChild(svg);
         chartWrapper.appendChild(chartBody);
+    }
+
+    ensureChartModal() {
+        if (this.chartModal) {
+            return this.chartModal;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'chart-modal-overlay hidden';
+
+        const modal = document.createElement('div');
+        modal.className = 'chart-modal';
+
+        const header = document.createElement('div');
+        header.className = 'chart-modal-header';
+
+        const title = document.createElement('div');
+        title.className = 'chart-modal-title';
+        title.textContent = '图表详情';
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'chart-modal-close';
+        closeBtn.setAttribute('aria-label', '关闭图表弹窗');
+        closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+
+        const body = document.createElement('div');
+        body.className = 'chart-modal-content';
+
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+        modal.appendChild(body);
+        overlay.appendChild(modal);
+
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) {
+                this.closeChartModal();
+            }
+        });
+
+        closeBtn.addEventListener('click', () => this.closeChartModal());
+
+        document.body.appendChild(overlay);
+
+        this.chartModal = {
+            overlay,
+            title,
+            body,
+        };
+
+        return this.chartModal;
+    }
+
+    closeChartModal() {
+        if (!this.chartModal) {
+            return;
+        }
+
+        this.chartModal.overlay.classList.add('hidden');
+        this.chartModal.body.innerHTML = '';
+    }
+
+    renderChartSummary(container, chartConfig) {
+        const summary = document.createElement('div');
+        summary.className = 'chart-modal-summary';
+
+        chartConfig.labels.forEach((label, index) => {
+            const item = document.createElement('div');
+            item.className = 'chart-modal-summary-item';
+
+            const labelEl = document.createElement('span');
+            labelEl.className = 'chart-modal-summary-label';
+            labelEl.textContent = label;
+
+            const valueEl = document.createElement('span');
+            valueEl.className = 'chart-modal-summary-value';
+            valueEl.textContent = String(chartConfig.values[index]);
+
+            item.appendChild(labelEl);
+            item.appendChild(valueEl);
+            summary.appendChild(item);
+        });
+
+        container.appendChild(summary);
+    }
+
+    openChartModal(chartConfig, chartTitleText = '图表详情') {
+        if (!chartConfig) {
+            return;
+        }
+
+        const modal = this.ensureChartModal();
+        modal.title.textContent = chartTitleText;
+        modal.body.innerHTML = '';
+
+        const enlargedChartWrapper = document.createElement('div');
+        enlargedChartWrapper.className = 'message-chart-wrapper chart-modal-chart-wrapper';
+
+        const chartTitle = document.createElement('div');
+        chartTitle.className = 'message-chart-title chart-modal-chart-title';
+        chartTitle.textContent = '放大视图';
+
+        enlargedChartWrapper.appendChild(chartTitle);
+        this.renderNativeChart(enlargedChartWrapper, chartConfig, { expanded: true });
+        modal.body.appendChild(enlargedChartWrapper);
+        this.renderChartSummary(modal.body, chartConfig);
+        modal.overlay.classList.remove('hidden');
     }
 
     tryRenderChartForMessage(messageDiv, content, userQuestion = '') {
@@ -1067,6 +1506,10 @@ class ChatBot {
 
         const chartWrapper = document.createElement('div');
         chartWrapper.className = 'message-chart-wrapper';
+        chartWrapper.setAttribute('role', 'button');
+        chartWrapper.setAttribute('tabindex', '0');
+        chartWrapper.setAttribute('aria-label', '点击放大图表');
+        chartWrapper.title = '点击放大图表';
 
         const chartTitle = document.createElement('div');
         chartTitle.className = 'message-chart-title';
@@ -1082,6 +1525,15 @@ class ChatBot {
         }
 
         this.renderNativeChart(chartWrapper, chartConfig);
+        chartWrapper.addEventListener('click', () => {
+            this.openChartModal({ ...chartConfig, labels: [...chartConfig.labels], values: [...chartConfig.values] }, '图表详情');
+        });
+        chartWrapper.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                this.openChartModal({ ...chartConfig, labels: [...chartConfig.labels], values: [...chartConfig.values] }, '图表详情');
+            }
+        });
         } catch (error) {
             console.error('[Chart] tryRenderChartForMessage error:', error);
         }
@@ -1102,13 +1554,13 @@ class ChatBot {
                     return this.formatMesData(parsed);
                 }
                 // 否则直接处理字符串
-                const cleaned = this.cleanUpText(data);
+                const cleaned = this.removeArtifactText(this.cleanUpText(data));
                 console.log('[formatMesData] Cleaned text:', cleaned);
                 return cleaned;
             } catch (e) {
                 // 不是有效的JSON，按普通字符串处理
                 console.log('[formatMesData] Parse error, treating as plain text');
-                const cleaned = this.cleanUpText(data);
+                const cleaned = this.removeArtifactText(this.cleanUpText(data));
                 console.log('[formatMesData] Cleaned text:', cleaned);
                 return cleaned;
             }
@@ -1125,9 +1577,9 @@ class ChatBot {
                 
                 let cleanValue = '';
                 if (typeof value === 'string') {
-                    cleanValue = this.cleanUpText(value);
+                    cleanValue = this.removeArtifactText(this.cleanUpText(value));
                 } else {
-                    cleanValue = String(value);
+                    cleanValue = this.removeArtifactText(String(value));
                 }
                 
                 // 跳过空的处理结果
@@ -1143,19 +1595,40 @@ class ChatBot {
         
         return String(data);
     }
+
+    removeArtifactText(text) {
+        const normalized = String(text || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+        return normalized
+            .replace(/\b\d{10,}\.text\b/g, '')
+            .replace(/(^|\n)[\t \f\v]*\.[\t \f\v]*(?=\n|$)/g, '$1')
+            .replace(/^\s*$/gm, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
     
     // 清理文本格式
     cleanUpText(text) {
         if (!text) return '';
         
         console.log('[cleanUpText] Input:', text);
-        
-        const result = text
+
+        const normalized = text
             .replace(/^[\n\s]+|[\n\s]+$/g, '') // 去除首尾空白
             .replace(/\\n/g, '\n') // 处理转义的换行符
-            .replace(/\n{3,}/g, '\n\n') // 合并多个连续换行
-            // 修正正则：只匹配真正的异常节点ID（换行符后跟13位以上的纯数字，然后是.text）
-            .replace(/\n\d{13,}\.text\s*$/g, '') // 去除末尾的异常节点ID（如 \n1769587035275.text）
+            .replace(/\r\n/g, '\n');
+
+        const withoutArtifactLines = this.removeArtifactText(normalized);
+
+        const result = withoutArtifactLines
+            .split('\n')
+            .filter((line) => !/^\s*\d{10,}\.text\s*$/.test(line.replace(/[\u200B-\u200D\uFEFF]/g, '')))
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
             .trim();
         
         console.log('[cleanUpText] Output:', result);
@@ -1238,6 +1711,14 @@ class ChatBot {
         this.scrollToBottom();
     }
 
+    setBotMarkdownContent(container, content) {
+        if (!container) {
+            return;
+        }
+
+        container.innerHTML = this.markdownToHtml(this.removeArtifactText(content || ''));
+    }
+
     async copyText(text) {
         const copyContent = text || '';
         if (!copyContent) {
@@ -1263,6 +1744,7 @@ class ChatBot {
         console.log('=== SEND MESSAGE STREAM ===');
         console.log('Query:', query);
         console.log('Conversation ID:', this.conversationId);
+        const requestStartedAt = performance.now();
         
         this.isStreaming = true;
         this.userStopped = false; // 重置停止标记
@@ -1272,6 +1754,8 @@ class ChatBot {
         let messageDiv = null;
         let contentDiv = null;
         let difyMessageId = null;
+        let fullAnswer = '';
+        let streamContentMode = null;
         let streamingUiReleased = false;
         const flushUiFrame = async () => {
             await new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -1283,6 +1767,54 @@ class ChatBot {
             streamingUiReleased = true;
             this.isStreaming = false;
             this.updateSendButton(false);
+        };
+        const renderBotStreamAnswer = () => {
+            if (!fullAnswer.trim()) {
+                return;
+            }
+
+            if (typingId) {
+                this.removeMessage(typingId);
+            }
+
+            const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
+            if (!messageCreated) {
+                const messageId = 'msg_' + Date.now();
+                messageDiv = this.createMessageElement(formattedAnswer, 'bot', messageId, difyMessageId);
+                this.chatMessages.appendChild(messageDiv);
+                contentDiv = messageDiv.querySelector('.markdown-body');
+                messageCreated = true;
+            } else if (contentDiv) {
+                this.setBotMarkdownContent(contentDiv, formattedAnswer);
+            }
+            this.scrollToBottom();
+        };
+        const acceptStreamContent = (mode, text, replace = false) => {
+            if (typeof text !== 'string' || !text) {
+                return false;
+            }
+
+            if (mode !== 'workflow') {
+                if (!streamContentMode) {
+                    streamContentMode = mode;
+                    console.log('[STREAM MODE] Selected content mode:', streamContentMode);
+                }
+
+                if (streamContentMode !== mode) {
+                    console.log('[STREAM MODE] Ignoring event from', mode, 'because active mode is', streamContentMode);
+                    return false;
+                }
+            } else {
+                streamContentMode = mode;
+            }
+
+            if (replace) {
+                fullAnswer = text;
+            } else {
+                fullAnswer += text;
+            }
+
+            return true;
         };
         
         try {
@@ -1314,18 +1846,19 @@ class ChatBot {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             
-            let fullAnswer = '';
-            
             // Read streaming response
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let pendingSseLine = '';
+            let streamShouldTerminate = false;
             
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 
-                const chunk = decoder.decode(value);
+                const chunk = pendingSseLine + decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n');
+                pendingSseLine = lines.pop() || '';
                 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
@@ -1359,95 +1892,36 @@ class ChatBot {
                                     
                                 // Only process if answer is not empty (ignore empty message events from workflow apps)
                                 if (answer) {
-                                    // Full message event - contains complete answer
-                                    // 累加答案内容（流式传输）
-                                    fullAnswer += answer;
+                                    if (!acceptStreamContent('message', answer, false)) {
+                                        continue;
+                                    }
                                     console.log('[MESSAGE EVENT] Accumulated answer length:', fullAnswer.length);
                                     console.log('[MESSAGE EVENT] messageCreated:', messageCreated);
                                     console.log('[MESSAGE EVENT] typingId:', typingId);
-                                    
-                                    // 确保只在有内容时才创建或更新消息
-                                    if (fullAnswer.trim()) {
-                                        if (!messageCreated) {
-                                            console.log('[MESSAGE EVENT] Creating new message element...');
-                                            // 先移除打字指示器
-                                            if (typingId) {
-                                                console.log('[MESSAGE EVENT] Removing typing indicator:', typingId);
-                                                this.removeMessage(typingId);
-                                            }
-                                            
-                                            const messageId = 'msg_' + Date.now();
-                                            
-                                            // 格式化答案内容
-                                            const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
-                                            const renderedContent = this.markdownToHtml(formattedAnswer);
-                                            console.log('[MESSAGE EVENT] Rendered content length:', renderedContent.length);
-                                            
-                                            // 创建完整的消息元素（所有子元素都在添加到DOM前创建好）
-                                            messageDiv = document.createElement('div');
-                                            messageDiv.className = 'message bot-message';
-                                            messageDiv.id = messageId;
-                                            
-                                            const avatar = document.createElement('div');
-                                            avatar.className = 'message-avatar bot-avatar';
-                                            avatar.textContent = '小易';
-                                            
-                                            const contentDivElement = document.createElement('div');
-                                            contentDivElement.className = 'message-content';
-                                            contentDivElement.innerHTML = `<div class="markdown-body"><p>${renderedContent}</p></div>`;
-                                            
-                                            // 先添加免责声明
-                                            const disclaimer = document.createElement('div');
-                                            disclaimer.className = 'message-disclaimer';
-                                            disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
-                                            disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
-                                            contentDivElement.appendChild(disclaimer);
-                                            
-                                            messageDiv.appendChild(avatar);
-                                            messageDiv.appendChild(contentDivElement);
-                                            
-                                            // 添加反馈按钮（会在免责声明之前插入）
-                                            this.addFeedbackButtons(messageDiv);
-                                            
-                                            // 确保所有内容都准备好后再添加到DOM
-                                            console.log('[MESSAGE EVENT] Adding message to DOM...');
-                                            this.chatMessages.appendChild(messageDiv);
-                                            contentDiv = contentDivElement.querySelector('p');
-                                            messageCreated = true;
-                                            console.log('[MESSAGE EVENT] ✓ Message created and added to DOM');
-                                        } else if (contentDiv) {
-                                            console.log('[MESSAGE EVENT] Updating existing message...');
-                                            // 更新已存在的消息内容
-                                            const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
-                                            
-                                            // 使用 Markdown 渲染
-                                            const markdownContainer = contentDiv.querySelector('.markdown-body p') || contentDiv.querySelector('p');
-                                            if (markdownContainer) {
-                                                markdownContainer.innerHTML = this.markdownToHtml(formattedAnswer);
-                                            } else {
-                                                contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(formattedAnswer)}</p></div>`;
-                                            }
-                                            console.log('[MESSAGE EVENT] ✓ Message updated');
-                                        }
-                                        
-                                        this.scrollToBottom();
-                                        releaseStreamingUi();
 
-                                        const eventMessageId = json.message_id || json.id || null;
-                                        if (eventMessageId && eventMessageId !== difyMessageId) {
-                                            difyMessageId = eventMessageId;
-                                            this.setBotMessageId(messageDiv, difyMessageId);
-                                        }
-                                    } else {
-                                        console.log('[MESSAGE EVENT] Answer is whitespace only, waiting for more content...');
+                                    const eventMessageId = json.message_id || json.id || null;
+                                    if (eventMessageId && eventMessageId !== difyMessageId) {
+                                        difyMessageId = eventMessageId;
                                     }
 
                                 } else {
                                     console.log('[MESSAGE EVENT] Answer is empty - skipping (workflow app sends answer in workflow_finished)');
                                 }
                             } else if (json.event === 'workflow_finished') {
-                                // Ignore workflow_finished - only use message event for Chat Message API
-                                console.log('[WORKFLOW_FINISHED EVENT] Ignoring - only processing message events');
+                                console.log('[WORKFLOW_FINISHED EVENT] Processing...');
+                                const workflowAnswer = json.data?.outputs?.answer || '';
+                                if (json.conversation_id) {
+                                    this.conversationId = json.conversation_id;
+                                    console.log('Updated conversation_id (from workflow_finished):', this.conversationId);
+                                }
+
+                                if (typeof workflowAnswer === 'string' && workflowAnswer.trim()) {
+                                    acceptStreamContent('workflow', workflowAnswer, true);
+                                    renderBotStreamAnswer();
+                                } else {
+                                    console.log('[WORKFLOW_FINISHED EVENT] No answer in outputs.answer');
+                                }
+                                streamShouldTerminate = true;
                             } else if (json.event === 'message_end') {
                                 // End of message - save conversation_id
                                 if (json.conversation_id) {
@@ -1457,93 +1931,33 @@ class ChatBot {
                                 const endMessageId = json.message_id || json.id || null;
                                 if (endMessageId && endMessageId !== difyMessageId) {
                                     difyMessageId = endMessageId;
-                                    this.setBotMessageId(messageDiv, difyMessageId);
                                 }
+                                renderBotStreamAnswer();
+                                if (difyMessageId) {
+                                    this.setBotMessageId(messageDiv, difyMessageId, performance.now() - requestStartedAt);
+                                }
+                                streamShouldTerminate = true;
                             } else if (json.event === 'agent_message' || json.event === 'text_chunk') {
                                 console.log('[AGENT_MESSAGE/TEXT_CHUNK EVENT] Processing...');
                                 // Streaming text chunks - accumulate content
                                 
                                 // Append streaming text if available
                                 if (json.data) {
-                                    const chunkText = json.data.text || json.data.answer || json.data;
+                                    const chunkText = typeof json.data?.text === 'string'
+                                        ? json.data.text
+                                        : typeof json.data?.answer === 'string'
+                                            ? json.data.answer
+                                            : typeof json.data === 'string'
+                                                ? json.data
+                                                : '';
                                     if (typeof chunkText === 'string' && chunkText) {
-                                        fullAnswer += chunkText;
+                                        if (!acceptStreamContent('chunk', chunkText, false)) {
+                                            continue;
+                                        }
                                         console.log('[AGENT_MESSAGE/TEXT_CHUNK] Accumulated length:', fullAnswer.length);
                                         console.log('[AGENT_MESSAGE/TEXT_CHUNK] messageCreated:', messageCreated);
-                                        
-                                        // 确保只在有内容时才创建或更新消息
-                                        if (fullAnswer.trim()) {
-                                            if (!messageCreated) {
-                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Creating new message...');
-                                                // 先移除打字指示器
-                                                if (typingId) {
-                                                    console.log('[AGENT_MESSAGE/TEXT_CHUNK] Removing typing indicator:', typingId);
-                                                    this.removeMessage(typingId);
-                                                }
-                                                
-                                                const messageId = 'msg_' + Date.now();
-                                                
-                                                // 格式化答案内容
-                                                const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
-                                                const renderedContent = this.markdownToHtml(formattedAnswer);
-                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Rendered content length:', renderedContent.length);
-                                                
-                                                // 创建完整的消息元素
-                                                messageDiv = document.createElement('div');
-                                                messageDiv.className = 'message bot-message';
-                                                messageDiv.id = messageId;
-                                                
-                                                const avatar = document.createElement('div');
-                                                avatar.className = 'message-avatar bot-avatar';
-                                                avatar.textContent = '小易';
-                                                
-                                                const contentDivElement = document.createElement('div');
-                                                contentDivElement.className = 'message-content';
-                                                contentDivElement.innerHTML = `<div class="markdown-body"><p>${renderedContent}</p></div>`;
-                                                
-                                                // 先添加免责声明
-                                                const disclaimer = document.createElement('div');
-                                                disclaimer.className = 'message-disclaimer';
-                                                disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
-                                                disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
-                                                contentDivElement.appendChild(disclaimer);
-                                                
-                                                messageDiv.appendChild(avatar);
-                                                messageDiv.appendChild(contentDivElement);
-                                                
-                                                // 添加反馈按钮（会在免责声明之前插入）
-                                                this.addFeedbackButtons(messageDiv);
-                                                
-                                                // 确保所有内容都准备好后再添加到DOM
-                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Adding message to DOM...');
-                                                this.chatMessages.appendChild(messageDiv);
-                                                contentDiv = contentDivElement.querySelector('p');
-                                                messageCreated = true;
-                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] ✓ Message created and added to DOM');
-                                            } else if (contentDiv) {
-                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] Updating existing message...');
-                                                // Update display with accumulated content
-                                                const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
-                                                const markdownContainer = contentDiv.querySelector('.markdown-body p') || contentDiv.querySelector('p');
-                                                if (markdownContainer) {
-                                                    markdownContainer.innerHTML = this.markdownToHtml(formattedAnswer);
-                                                } else {
-                                                    contentDiv.innerHTML = `<div class="markdown-body"><p>${this.markdownToHtml(formattedAnswer)}</p></div>`;
-                                                }
-                                                console.log('[AGENT_MESSAGE/TEXT_CHUNK] ✓ Message updated');
-                                            }
-                                            
-                                            this.scrollToBottom();
-                                            releaseStreamingUi();
-                                        } else {
-                                            console.log('[AGENT_MESSAGE/TEXT_CHUNK] Content is whitespace only, waiting...');
-                                        }
                                     }
                                 }
-                            } else if (json.event === 'workflow_finished') {
-                                // 忽略 workflow_finished 事件，因为使用的是 Chat Message API
-                                // message 事件已经包含了完整答案
-                                console.log('[WORKFLOW_FINISHED EVENT] Ignored - using message event instead');
                             } else if (json.event === 'node_finished') {
                                 // 忽略 node_finished 事件
                                 console.log('[NODE_FINISHED EVENT] Ignored');
@@ -1563,12 +1977,46 @@ class ChatBot {
                                 // Unknown event, log it
                                 console.log('Unknown event:', json.event, json);
                             }
+
+                            if (streamShouldTerminate) {
+                                break;
+                            }
                         }
                     }
                 }
 
+                if (streamShouldTerminate) {
+                    console.log('[STREAM] Terminal event received, ending stream reader early');
+                    await reader.cancel();
+                    pendingSseLine = '';
+                    break;
+                }
+
             }
 
+            const tail = (pendingSseLine + decoder.decode()).trim();
+            if (tail.startsWith('data: ')) {
+                console.log('[SSE TAIL] Remaining buffered line detected after stream end');
+                const data = tail.slice(6).trim();
+                if (data) {
+                    let json = null;
+                    try {
+                        json = JSON.parse(data);
+                    } catch (parseError) {
+                        console.warn('Failed to parse trailing JSON:', data, parseError);
+                    }
+
+                    if (json?.event === 'workflow_finished') {
+                        const workflowAnswer = json.data?.outputs?.answer || '';
+                        if (typeof workflowAnswer === 'string' && workflowAnswer.trim()) {
+                            acceptStreamContent('workflow', workflowAnswer, true);
+                            renderBotStreamAnswer();
+                        }
+                    }
+                }
+            }
+
+            renderBotStreamAnswer();
             releaseStreamingUi();
             await flushUiFrame();
             
@@ -1600,6 +2048,14 @@ class ChatBot {
                 if (messageDiv) {
                     const formattedAnswer = this.appendAvatarUrlDebug(this.formatMesData(fullAnswer));
                     this.tryRenderChartForMessage(messageDiv, formattedAnswer, query);
+                    if (!messageDiv.querySelector('.message-duration')) {
+                        this.setBotMessageDuration(messageDiv, performance.now() - requestStartedAt);
+                    }
+                }
+
+                // Keep sidebar history fresh while it is open.
+                if (this.sidebar && this.sidebar.classList.contains('open')) {
+                    await this.loadConversations();
                 }
                 
                 // 添加免责声明到最新的机器人消息
@@ -1731,18 +2187,17 @@ class ChatBot {
         const markdownBody = document.createElement('div');
         markdownBody.className = 'markdown-body';
         
-        const p = document.createElement('p');
         if (content) {
             if (type === 'bot') {
-                // Bot消息使用markdown渲染
-                p.innerHTML = this.markdownToHtml(content);
+                this.setBotMarkdownContent(markdownBody, content);
             } else {
+                const p = document.createElement('p');
                 // 用户消息保持纯文本
                 p.textContent = content;
+                markdownBody.appendChild(p);
             }
         }
-        
-        markdownBody.appendChild(p);
+
         contentDiv.appendChild(markdownBody);
 
         if (type === 'user') {
@@ -1957,7 +2412,7 @@ class ChatBot {
         }
     }
 
-    setBotMessageId(messageDiv, difyMessageId) {
+    setBotMessageId(messageDiv, difyMessageId, elapsedMs = null) {
         if (!messageDiv || !difyMessageId) {
             return;
         }
@@ -1967,6 +2422,41 @@ class ChatBot {
         actionBtns.forEach((btn) => {
             btn.disabled = false;
         });
+
+        if (elapsedMs !== null) {
+            this.setBotMessageDuration(messageDiv, elapsedMs);
+        }
+    }
+
+    formatElapsedTime(elapsedMs) {
+        const safeElapsed = Math.max(0, Number(elapsedMs) || 0);
+        if (safeElapsed < 1000) {
+            return `${Math.max(1, Math.round(safeElapsed))}ms`;
+        }
+        if (safeElapsed < 10000) {
+            return `${(safeElapsed / 1000).toFixed(1)}s`;
+        }
+        return `${Math.round(safeElapsed / 1000)}s`;
+    }
+
+    setBotMessageDuration(messageDiv, elapsedMs) {
+        if (!messageDiv) {
+            return;
+        }
+
+        const contentDiv = messageDiv.querySelector('.message-content');
+        if (!contentDiv) {
+            return;
+        }
+
+        let durationEl = contentDiv.querySelector('.message-duration');
+        if (!durationEl) {
+            durationEl = document.createElement('span');
+            durationEl.className = 'message-duration';
+        }
+
+        durationEl.textContent = `总耗时：${this.formatElapsedTime(elapsedMs)}`;
+        contentDiv.appendChild(durationEl);
     }
 
     setFeedbackState(messageDiv, rating) {
@@ -2076,13 +2566,139 @@ class ChatBot {
         this.sidebar.classList.remove('open');
         this.sidebarOverlay.classList.remove('show');
         this.closeAllConversationMenus();
+        if (this.isMultiSelectMode) {
+            this.toggleMultiSelectMode(false);
+        }
+    }
+
+    toggleMultiSelectMode(forceMode = null) {
+        const nextMode = typeof forceMode === 'boolean' ? forceMode : !this.isMultiSelectMode;
+        this.isMultiSelectMode = nextMode;
+        if (!nextMode) {
+            this.selectedConversationIds.clear();
+            this.closeAllConversationMenus();
+        }
+        this.updateBulkActionsBar();
+        this.loadConversations();
+    }
+
+    updateBulkActionsBar() {
+        if (this.bulkActionsBar) {
+            this.bulkActionsBar.classList.toggle('hidden', !this.isMultiSelectMode);
+        }
+        if (this.multiSelectBtn) {
+            this.multiSelectBtn.classList.toggle('active', this.isMultiSelectMode);
+            this.multiSelectBtn.title = this.isMultiSelectMode ? '退出多选' : '多选删除';
+        }
+        if (this.selectedCountText) {
+            this.selectedCountText.textContent = `已选择 ${this.selectedConversationIds.size} 项`;
+        }
+        if (this.bulkDeleteBtn) {
+            this.bulkDeleteBtn.disabled = this.selectedConversationIds.size === 0;
+        }
+    }
+
+    toggleConversationSelection(conversationId, selected) {
+        if (!conversationId) {
+            return;
+        }
+        if (selected) {
+            this.selectedConversationIds.add(conversationId);
+        } else {
+            this.selectedConversationIds.delete(conversationId);
+        }
+        this.updateBulkActionsBar();
+    }
+
+    showBulkDeleteConfirmDialog(count) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'delete-confirm-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'delete-confirm-modal';
+            modal.innerHTML = `
+                <div class="delete-confirm-title">确认批量删除？</div>
+                <div class="delete-confirm-text">将删除选中的 ${count} 条会话及其聊天记录，此操作不可恢复。</div>
+                <div class="delete-confirm-actions">
+                    <button type="button" class="delete-confirm-cancel">取消</button>
+                    <button type="button" class="delete-confirm-ok">删除</button>
+                </div>
+            `;
+
+            const close = (result) => {
+                overlay.remove();
+                resolve(result);
+            };
+
+            overlay.addEventListener('click', () => close(false));
+            modal.addEventListener('click', (e) => e.stopPropagation());
+            modal.querySelector('.delete-confirm-cancel').addEventListener('click', () => close(false));
+            modal.querySelector('.delete-confirm-ok').addEventListener('click', () => close(true));
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+        });
+    }
+
+    async handleBulkDeleteConversations() {
+        const selectedIds = Array.from(this.selectedConversationIds);
+        if (!selectedIds.length) {
+            return;
+        }
+
+        const confirmed = await this.showBulkDeleteConfirmDialog(selectedIds.length);
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            const results = await Promise.allSettled(
+                selectedIds.map((conversationId) =>
+                    fetch(`/api/v1/conversations/${conversationId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ user: this.userId })
+                    })
+                )
+            );
+
+            let failedCount = 0;
+            results.forEach((result, index) => {
+                if (result.status !== 'fulfilled' || !result.value.ok) {
+                    failedCount += 1;
+                    return;
+                }
+
+                if (this.conversationId === selectedIds[index]) {
+                    this.clearChat();
+                }
+            });
+
+            this.selectedConversationIds.clear();
+            this.updateBulkActionsBar();
+            await this.loadConversations();
+
+            if (failedCount > 0) {
+                alert(`已完成批量删除，但有 ${failedCount} 条删除失败，请重试。`);
+            }
+
+            if (this.isMultiSelectMode && this.selectedConversationIds.size === 0) {
+                this.toggleMultiSelectMode(false);
+            }
+        } catch (error) {
+            console.error('Error deleting multiple conversations:', error);
+            alert('批量删除失败，请重试');
+        }
     }
     
     async loadConversations() {
         try {
             this.conversationList.innerHTML = '<div class="loading-conversations"><div class="spinner"></div><span>加载中...</span></div>';
             
-            const response = await fetch(`/api/v1/conversations?user=${this.userId}&limit=80`);
+            const response = await fetch(`/api/v1/conversations?user=${this.userId}&limit=80&sort_by=-updated_at`);
             if (!response.ok) {
                 throw new Error('Failed to load conversations');
             }
@@ -2098,17 +2714,34 @@ class ChatBot {
     renderConversations(conversations) {
         if (!conversations || conversations.length === 0) {
             this.conversationList.innerHTML = '<div class="no-conversations">暂无历史会话</div>';
+            this.selectedConversationIds.clear();
+            this.updateBulkActionsBar();
             return;
         }
         
         this.conversationList.innerHTML = '';
-        // 反转数组，使最新的会话显示在最前面
-        const reversedConversations = [...conversations].reverse();
-        reversedConversations.forEach(conv => {
+        // 后端按更新时间倒序返回，前端直接渲染。
+        conversations.forEach(conv => {
             const item = document.createElement('div');
             item.className = 'conversation-item';
+            if (this.isMultiSelectMode) {
+                item.classList.add('select-mode');
+            }
             if (conv.id === this.conversationId) {
                 item.classList.add('active');
+            }
+
+            if (this.isMultiSelectMode) {
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'conversation-item-select';
+                checkbox.checked = this.selectedConversationIds.has(conv.id);
+                checkbox.addEventListener('click', (e) => e.stopPropagation());
+                checkbox.addEventListener('change', () => {
+                    this.toggleConversationSelection(conv.id, checkbox.checked);
+                    item.classList.toggle('active', checkbox.checked);
+                });
+                item.appendChild(checkbox);
             }
 
             const main = document.createElement('div');
@@ -2149,19 +2782,37 @@ class ChatBot {
                 await this.handleDeleteConversation(conv.id, conv.name || '新对话');
             });
 
-            actions.appendChild(menuBtn);
-            actions.appendChild(menu);
+            if (!this.isMultiSelectMode) {
+                actions.appendChild(menuBtn);
+                actions.appendChild(menu);
+            }
 
             main.appendChild(name);
             main.appendChild(time);
             
             item.appendChild(main);
-            item.appendChild(actions);
+            if (!this.isMultiSelectMode) {
+                item.appendChild(actions);
+            }
             
-            item.addEventListener('click', () => this.loadConversation(conv.id));
+            item.addEventListener('click', () => {
+                if (this.isMultiSelectMode) {
+                    const nextChecked = !this.selectedConversationIds.has(conv.id);
+                    this.toggleConversationSelection(conv.id, nextChecked);
+                    const checkbox = item.querySelector('.conversation-item-select');
+                    if (checkbox) {
+                        checkbox.checked = nextChecked;
+                    }
+                    item.classList.toggle('active', nextChecked);
+                    return;
+                }
+                this.loadConversation(conv.id);
+            });
             
             this.conversationList.appendChild(item);
         });
+
+        this.updateBulkActionsBar();
     }
 
     toggleConversationMenu(menuElement) {
@@ -2342,6 +2993,12 @@ class ChatBot {
                 disclaimer.style.cssText = 'color: #6c757d; font-size: 12px; margin-top: 8px; text-align: right; font-style: italic;';
                 disclaimer.textContent = '- 数据仅供参考，需认真核对再使用 -';
                 contentDiv.appendChild(disclaimer);
+            }
+
+            const durationEl = contentDiv ? contentDiv.querySelector('.message-duration') : null;
+            if (durationEl) {
+                // Ensure duration stays at the very bottom.
+                contentDiv.appendChild(durationEl);
             }
         }
     }

@@ -2,6 +2,7 @@
 import httpx
 import json
 import logging
+import re
 from typing import AsyncGenerator, Dict, Any, Optional
 from app.config import settings
 
@@ -164,6 +165,8 @@ def format_mes_result(raw_output: str) -> str:
 
 class DifyClient:
     """Client for interacting with Dify API."""
+
+    _artifact_pattern = re.compile(r"\b\d{10,}\.text\b")
     
     def __init__(self):
         self.api_url = settings.DIFY_API_URL
@@ -172,6 +175,40 @@ class DifyClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+
+    def _sanitize_text_artifacts(self, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+        cleaned = self._artifact_pattern.sub("", normalized)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        return cleaned
+
+    def _sanitize_stream_event(self, event_json: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized = dict(event_json)
+
+        if "answer" in sanitized:
+            sanitized["answer"] = self._sanitize_text_artifacts(sanitized.get("answer"))
+
+        data = sanitized.get("data")
+        if isinstance(data, dict):
+            data = dict(data)
+            if "text" in data:
+                data["text"] = self._sanitize_text_artifacts(data.get("text"))
+            if "answer" in data:
+                data["answer"] = self._sanitize_text_artifacts(data.get("answer"))
+
+            outputs = data.get("outputs")
+            if isinstance(outputs, dict):
+                outputs = dict(outputs)
+                if "answer" in outputs:
+                    outputs["answer"] = self._sanitize_text_artifacts(outputs.get("answer"))
+                data["outputs"] = outputs
+
+            sanitized["data"] = data
+
+        return sanitized
 
     def _format_exception(self, error: Exception) -> str:
         """Format exception with fallback details when str(error) is empty."""
@@ -224,7 +261,10 @@ class DifyClient:
                     json=payload
                 )
                 response.raise_for_status()
-                return response.json()
+                result = response.json()
+                if isinstance(result, dict) and "answer" in result:
+                    result["answer"] = self._sanitize_text_artifacts(result.get("answer"))
+                return result
             except httpx.HTTPStatusError as e:
                 error_detail = e.response.text
                 logger.error(f"Dify API error {e.response.status_code}: {error_detail}")
@@ -386,6 +426,8 @@ class DifyClient:
                                     logger.info(f"Event Type: {event_type}")
                                     logger.info(f"Raw Data: {data}")
                                     logger.info(f"Parsed JSON: {json.dumps(event_json, ensure_ascii=False, indent=2)}")
+                                    event_json = self._sanitize_stream_event(event_json)
+                                    data = json.dumps(event_json, ensure_ascii=False)
                                     
                                     # Handle different chat message events
                                     if event_type == "message":
@@ -408,6 +450,7 @@ class DifyClient:
                                         logger.info(f"Workflow finished detected - this is a workflow app. Skipping stored message event.")
                                         logger.info(f"Workflow finished with answer: {answer[:200]}")
                                         yield data
+                                        break
                                     elif event_type == "node_finished":
                                         # Node finished - for workflow apps, don't send to frontend
                                         # Only workflow_finished should be sent to avoid duplicate display
@@ -556,6 +599,8 @@ class DifyClient:
                 if 'data' in result:
                     logger.info(f"Number of messages: {len(result['data'])}")
                     for idx, msg in enumerate(result['data']):
+                        if isinstance(msg, dict) and 'answer' in msg:
+                            msg['answer'] = self._sanitize_text_artifacts(msg.get('answer'))
                         logger.info(f"Message {idx + 1}:")
                         logger.info(f"  - Query: {msg.get('query', 'N/A')}")
                         logger.info(f"  - Answer: {msg.get('answer', 'N/A')[:200]}...")

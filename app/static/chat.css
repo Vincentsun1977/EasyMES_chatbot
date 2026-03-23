@@ -76,6 +76,12 @@ body {
     margin: 0;
 }
 
+.sidebar-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .btn-icon-small {
     background: transparent;
     border: none;
@@ -91,6 +97,54 @@ body {
 
 .btn-icon-small:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+
+.sidebar-bulk-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff7f7;
+    color: #7f1d1d;
+    font-size: 12px;
+}
+
+.sidebar-bulk-actions.hidden {
+    display: none;
+}
+
+.sidebar-bulk-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.bulk-delete-btn,
+.bulk-cancel-btn {
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    background: #ffffff;
+}
+
+.bulk-delete-btn {
+    border-color: #dc2626;
+    background: #dc2626;
+    color: #ffffff;
+}
+
+.bulk-delete-btn:disabled {
+    background: #fca5a5;
+    border-color: #fca5a5;
+    cursor: not-allowed;
+}
+
+.bulk-cancel-btn:hover {
+    background: #fee2e2;
 }
 
 .conversation-list {
@@ -128,6 +182,22 @@ body {
     background: linear-gradient(135deg, rgba(255, 0, 15, 0.1), rgba(255, 0, 15, 0.05));
     border-color: var(--red-1);
     box-shadow: 0 2px 8px rgba(255, 0, 15, 0.15);
+}
+
+.conversation-item.select-mode {
+    padding-left: 8px;
+}
+
+.conversation-item-select {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--red-1);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.conversation-item.select-mode .conversation-actions {
+    display: none;
 }
 
 .conversation-name {
@@ -359,6 +429,7 @@ body {
 .chat-header h2 {
     font-size: 18px;
     font-weight: 800;
+    color: #ffffff;
     letter-spacing: 0.4px;
     flex: 1;
     white-space: nowrap;
@@ -366,6 +437,11 @@ body {
     text-overflow: ellipsis;
     position: relative;
     z-index: 1;
+}
+
+.chat-header .header-version {
+    color: #d1d5db;
+    font-weight: 400;
 }
 
 .header-actions {
@@ -471,9 +547,9 @@ body {
 
 .message-content {
     max-width: 72%;
-    padding: 14px 18px;
+    padding: 11px 15px;
     border-radius: 16px;
-    line-height: 1.5;
+    line-height: 1.42;
     word-wrap: break-word;
     box-shadow: var(--shadow-soft);
     position: relative;
@@ -507,20 +583,38 @@ body {
 }
 
 .message-feedback-actions {
-    margin-top: 10px;
+    margin-top: 6px;
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: 8px;
 }
 
+.message-feedback-actions .message-duration {
+    margin-right: auto;
+}
+
 .message-chart-wrapper {
-    margin-top: 10px;
+    margin-top: 8px;
     padding: 8px 10px;
     border: 1px solid #e5e7eb;
     border-radius: 12px;
     background: #fafafa;
     width: 100%;
     max-width: 420px;
+    cursor: zoom-in;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.message-chart-wrapper:hover {
+    transform: translateY(-1px);
+    border-color: #fca5a5;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+}
+
+.message-chart-wrapper:focus-visible {
+    outline: 2px solid rgba(255, 0, 15, 0.35);
+    outline-offset: 2px;
 }
 
 .message-chart-body {
@@ -550,6 +644,127 @@ body {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+.chart-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.58);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 2100;
+}
+
+.chart-modal-overlay.hidden {
+    display: none;
+}
+
+.chart-modal {
+    width: min(960px, 96vw);
+    max-height: 92vh;
+    overflow: hidden;
+    background: #ffffff;
+    border-radius: 20px;
+    border: 1px solid rgba(229, 231, 235, 0.9);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.24);
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+}
+
+.chart-modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.chart-modal-close {
+    width: 34px;
+    height: 34px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #4b5563;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.chart-modal-close:hover {
+    color: #ff000f;
+    border-color: #fca5a5;
+    background: #fff5f5;
+}
+
+.chart-modal-content {
+    padding: 20px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.chart-modal-chart-wrapper {
+    max-width: none;
+    width: 100%;
+    cursor: default;
+}
+
+.chart-modal-chart-wrapper:hover {
+    transform: none;
+}
+
+.chart-modal-chart-title {
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.chart-modal-body {
+    height: 360px;
+    min-height: 360px;
+    max-height: 360px;
+}
+
+.chart-modal-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+
+.chart-modal-summary-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f9fafb;
+}
+
+.chart-modal-summary-label {
+    color: #374151;
+    font-size: 13px;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.chart-modal-summary-value {
+    color: #111827;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .fallback-chart-list {
@@ -1220,7 +1435,7 @@ body {
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
-    margin: 12px 0;
+    margin: 8px 0;
 }
 
 .mes-table-wrapper::-webkit-scrollbar {
@@ -1241,7 +1456,7 @@ body {
     width: max-content;
     min-width: 100%;
     border-collapse: collapse;
-    margin: 16px 0;
+    margin: 10px 0;
     background: #ffffff;
     border-radius: 12px;
     overflow: hidden;
@@ -1265,7 +1480,7 @@ body {
 }
 
 .mes-table th {
-    padding: 14px 18px;
+    padding: 10px 14px;
     text-align: left;
     font-weight: 600;
     letter-spacing: 0.3px;
@@ -1274,7 +1489,7 @@ body {
 }
 
 .mes-table td {
-    padding: 12px 18px;
+    padding: 8px 14px;
     border-bottom: 1px solid #f3f4f6;
     color: var(--gray-4);
     transition: background-color 0.2s ease;
@@ -1370,7 +1585,7 @@ body {
 /* Modern Markdown-body styles */
 .markdown-body {
     color: #1f2937;
-    line-height: 1.5;
+    line-height: 1.42;
     font-size: 15px;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -1425,8 +1640,8 @@ body {
 
 /* Blockquotes */
 .markdown-body blockquote {
-    margin: 8px 0;
-    padding: 12px 16px;
+    margin: 6px 0;
+    padding: 8px 12px;
     border-left: 4px solid var(--red-1);
     background: #fef2f2;
     color: #FF000F;
@@ -1439,8 +1654,8 @@ body {
     font-size: 24px;
     font-weight: 700;
     color: var(--red-2);
-    margin: 12px 0 8px 0;
-    padding-bottom: 8px;
+    margin: 8px 0 5px 0;
+    padding-bottom: 5px;
     border-bottom: 2px solid #fee2e2;
 }
 
@@ -1448,8 +1663,8 @@ body {
     font-size: 20px;
     font-weight: 600;
     color: var(--red-2);
-    margin: 10px 0 6px 0;
-    padding-bottom: 6px;
+    margin: 7px 0 4px 0;
+    padding-bottom: 4px;
     border-bottom: 1px solid #fecaca;
 }
 
@@ -1457,19 +1672,19 @@ body {
     font-size: 18px;
     font-weight: 600;
     color: var(--red-3);
-    margin: 8px 0 6px 0;
+    margin: 6px 0 4px 0;
 }
 
 /* Enhanced lists */
 .markdown-body ol {
-    margin: 8px 0;
+    margin: 5px 0;
     padding-left: 0;
     counter-reset: list-counter;
 }
 
 .markdown-body ol li {
     position: relative;
-    padding: 4px 0 4px 32px;
+    padding: 2px 0 2px 30px;
     counter-increment: list-counter;
     list-style: none;
 }
@@ -1492,13 +1707,18 @@ body {
 }
 
 .markdown-body ul {
-    margin: 8px 0;
+    margin: 5px 0;
     padding-left: 0;
     list-style: none;
 }
 
+.markdown-body ul ul {
+    margin-top: 4px;
+    margin-left: 16px;
+}
+
 .markdown-body ul li {
-    padding: 4px 0 4px 24px;
+    padding: 2px 0 2px 22px;
     position: relative;
 }
 
@@ -1513,7 +1733,7 @@ body {
 
 /* Spacing improvements */
 .markdown-body p {
-    margin: 0 0 8px 0;
+    margin: 0 0 4px 0;
 }
 
 .markdown-body p:last-child {
@@ -1534,5 +1754,188 @@ body {
 .markdown-body em {
     color: #6b7280;
     font-style: italic;
+}
+
+/* Compact bot reply spacing */
+.bot-message .message-content {
+    padding: 9px 12px;
+}
+
+.bot-message .markdown-body {
+    line-height: 1.6;
+}
+
+.bot-message .markdown-body br {
+    display: block;
+    margin-top: -0.4em;
+}
+
+/* 隐藏列表内部多余的 <br> */
+.bot-message .markdown-body ul > br,
+.bot-message .markdown-body ol > br {
+    display: none;
+}
+
+.bot-message .markdown-body h1.markdown-h1 {
+    margin: 4px 0 3px;
+    padding-bottom: 3px;
+}
+
+.bot-message .markdown-body h2.markdown-h2 {
+    margin: 4px 0 3px;
+    padding-bottom: 2px;
+}
+
+.bot-message .markdown-body h3.markdown-h3 {
+    margin: 3px 0 2px;
+}
+
+.bot-message .markdown-body .markdown-section {
+    margin: 8px 0 0;
+}
+
+.bot-message .markdown-body .markdown-section:first-child {
+    margin-top: 4px;
+}
+
+.bot-message .markdown-body .markdown-section + .markdown-section {
+    margin-top: 12px;
+}
+
+.bot-message .markdown-body .markdown-section.markdown-section-list-only {
+    position: relative;
+    padding-bottom: 18px;
+    margin-bottom: 8px;
+}
+
+.bot-message .markdown-body .markdown-section.markdown-section-list-only.markdown-section-has-divider::after {
+    content: '';
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 0;
+    height: 1px;
+    background: #e5e7eb;
+}
+
+.bot-message .markdown-body .markdown-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #111827;
+    margin-bottom: 6px;
+    word-break: keep-all;
+    overflow-wrap: normal;
+}
+
+.bot-message .markdown-body .markdown-auto-heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: #111827;
+    letter-spacing: 0.01em;
+}
+
+.bot-message .markdown-body .markdown-section > ul,
+.bot-message .markdown-body .markdown-section > ol {
+    margin: 0;
+}
+
+.bot-message .markdown-body p {
+    margin: 0 0 2px;
+}
+
+.bot-message .markdown-body ul,
+.bot-message .markdown-body ol {
+    margin: 3px 0;
+}
+
+.bot-message .markdown-body ul li,
+.bot-message .markdown-body ol li {
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 1.6;
+}
+
+.bot-message .markdown-body blockquote {
+    margin: 4px 0;
+    padding: 6px 10px;
+}
+
+.bot-message .mes-table-wrapper {
+    margin: 6px 0;
+}
+
+.bot-message .mes-table {
+    margin: 6px 0;
+}
+
+.bot-message .mes-table th {
+    padding: 8px 10px;
+}
+
+.bot-message .mes-table td {
+    padding: 6px 10px;
+}
+
+.bot-message .message-feedback-actions {
+    margin-top: 2.4em;
+}
+
+.bot-message .message-duration {
+    display: block;
+    margin-top: 6px;
+    text-align: right;
+    font-size: 11px;
+    color: #9ca3af;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.bot-message .message-disclaimer {
+    margin-top: 4px !important;
+}
+
+@media (max-width: 768px) {
+    .bot-message .message-content {
+        padding: 8px 10px;
+    }
+
+    .bot-message .markdown-body {
+        line-height: 1.6;
+    }
+
+    .bot-message .markdown-body h1.markdown-h1,
+    .bot-message .markdown-body h2.markdown-h2,
+    .bot-message .markdown-body h3.markdown-h3 {
+        margin-top: 3px;
+        margin-bottom: 2px;
+    }
+
+    .bot-message .markdown-body .markdown-section + .markdown-section {
+        margin-top: 10px;
+    }
+
+    .bot-message .markdown-body .markdown-section.markdown-section-list-only {
+        padding-bottom: 14px;
+        margin-bottom: 6px;
+    }
+
+    .bot-message .markdown-body .markdown-section.markdown-section-list-only.markdown-section-has-divider::after {
+        left: 8px;
+        right: 8px;
+    }
+
+    .bot-message .markdown-body .markdown-auto-heading {
+        font-size: 15px;
+    }
+
+    .bot-message .markdown-body p {
+        margin-bottom: 2px;
+    }
+
+    .bot-message .mes-table th,
+    .bot-message .mes-table td {
+        padding: 5px 7px;
+    }
 }
 

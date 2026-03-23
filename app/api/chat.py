@@ -278,7 +278,7 @@ async def get_conversations(
     user: str,
     last_id: str = None,
     limit: int = 20,
-    sort_by: str = "created_at"
+    sort_by: str = "-updated_at"
 ):
     """
     Get conversation history for a user.
@@ -287,7 +287,7 @@ async def get_conversations(
         user: User identifier
         last_id: Optional last conversation ID for pagination
         limit: Number of records to return (default 20, max 100)
-        sort_by: Sort field, default created_at (oldest first)
+        sort_by: Sort field, default -updated_at (latest updated first)
         
     Returns:
         List of conversations with pagination info

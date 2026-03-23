@@ -8,7 +8,7 @@
     <meta name="format-detection" content="telephone=no">
     <title>AI Chatbot</title>
     <link rel="icon" type="image/png" href="/static-debug/chatbot.png">
-    <link rel="stylesheet" href="/static-debug/chat.css?v=41">
+    <link rel="stylesheet" href="/static-debug/chat.css?v=59">
 </head>
 <body>
     <div class="chat-container">
@@ -16,11 +16,26 @@
         <div id="sidebar" class="sidebar">
             <div class="sidebar-header">
                 <h3>历史会话</h3>
-                <button id="closeSidebar" class="btn-icon-small">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
-                </button>
+                <div class="sidebar-header-actions">
+                    <button id="multiSelectBtn" class="btn-icon-small" title="多选删除">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 11l3 3L22 4"/>
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                        </svg>
+                    </button>
+                    <button id="closeSidebar" class="btn-icon-small" title="关闭">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="conversationBulkActions" class="sidebar-bulk-actions hidden">
+                <span id="selectedCountText">已选择 0 项</span>
+                <div class="sidebar-bulk-actions-right">
+                    <button id="bulkDeleteBtn" class="bulk-delete-btn" type="button">删除选中</button>
+                    <button id="cancelMultiSelectBtn" class="bulk-cancel-btn" type="button">取消</button>
+                </div>
             </div>
             <div id="conversationList" class="conversation-list">
                 <div class="loading-conversations">
@@ -40,7 +55,7 @@
                     <path d="M3 12h18M3 6h18M3 18h18"/>
                 </svg>
             </button>
-            <h2>小易 - EasyMES AI助手 Beta 1.0</h2>
+            <h2>小易 - EasyMES AI助手 <span class="header-version">V1.0.0-beta.2+build.20260321</span></h2>
             <div class="header-actions">
                 <button id="clearBtn" class="btn-icon" title="新对话">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -57,20 +72,22 @@
                 <div class="message-avatar bot-avatar">小易</div>
                 <div class="message-content">
                     <div class="markdown-body">
-                        <p>您好！我是小易，我可以回答关于**EasyMES**的相关问题，比如：<br>
-                            <br>
-                            📊 数据查询类型<br>
-                            1. **产线数据** - 某月某产线的转序数量<br>
-                            2. **操作员信息** - 某操作工人某天的完成数量<br>
-                            3. **订单参数** - 某订单/产品的参数<br>
-                            <br>
-                            ⚠️ **重要提示**：请尽量提供具体的信息以便我更好地帮助您，比如`订单号`、`日期`等。<br>
-                            <br>
-                            💡 示例查询
-                            - "请查询2024年1月产线A的转序数量"<br>
-                            - "张三昨天的完成数量是多少？"<br>
-                            - "订单12345的产品参数"
-                        </p>
+                        <p>您好！我是小易，我可以回答关于 EasyMES 的相关问题，比如：</p>
+                        <div class="markdown-section">
+                            <h3 class="markdown-h3 markdown-section-heading markdown-auto-heading">数据查询类型</h3>
+                            <ul>
+                                <li><strong>产线数据</strong> - 某月某产线的转序数量</li>
+                                <li><strong>操作员信息</strong> - 某操作工人某天的完成数量</li>
+                                <li><strong>订单参数</strong> - 某订单或产品的参数</li>
+                            </ul>
+                        </div>
+                        <div class="markdown-section">
+                            <h3 class="markdown-h3 markdown-section-heading markdown-auto-heading">重要提示</h3>
+                            <ul>
+                                <li>请尽量提供具体的信息，以便我更好地帮助您，比如订单号、工序名称、日期等。</li>
+                                <li>目前小易是在内测阶段，功能可能不完全稳定，欢迎反馈您的使用体验。😀</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -100,6 +117,6 @@
         </div>
     </div>
 
-    <script src="/static-debug/chat.js?v=62"></script>
+    <script src="/static-debug/chat.js?v=78"></script>
 </body>
 </html>
