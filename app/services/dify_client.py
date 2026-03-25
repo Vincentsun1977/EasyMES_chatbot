@@ -3,6 +3,7 @@ import httpx
 import json
 import logging
 import re
+from uuid import uuid4
 from typing import AsyncGenerator, Dict, Any, Optional
 from app.config import settings
 
@@ -224,13 +225,24 @@ class DifyClient:
             message = f"{error.__class__.__name__}: {message}"
 
         return message
+
+    def _ensure_trace_id(self, trace_id: Optional[str] = None) -> str:
+        candidate = str(trace_id or "").strip()
+        return candidate or str(uuid4())
+
+    def _build_dify_request_headers(self, trace_id: str) -> Dict[str, str]:
+        return {
+            **self.headers,
+            "X-Trace-Id": trace_id,
+        }
     
     async def send_message(
         self,
         query: str,
         user: str,
         conversation_id: Optional[str] = None,
-        inputs: Optional[Dict[str, Any]] = None
+        inputs: Optional[Dict[str, Any]] = None,
+        trace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Send a message to Dify API (blocking mode).
@@ -244,26 +256,33 @@ class DifyClient:
         Returns:
             API response as dictionary
         """
+        resolved_trace_id = self._ensure_trace_id(trace_id)
         payload = {
             "inputs": inputs or {},
             "query": query,
             "response_mode": "blocking",
             "conversation_id": conversation_id or "",
-            "user": user
+            "user": user,
+            "trace_id": resolved_trace_id
         }
+        request_headers = self._build_dify_request_headers(resolved_trace_id)
+        request_params = {"trace_id": resolved_trace_id}
         
         async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT_SECONDS, verify=settings.VERIFY_SSL) as client:
             try:
                 logger.info(f"Sending chat message to Dify: {json.dumps(payload, ensure_ascii=False)}")
                 response = await client.post(
                     f"{self.api_url}/chat-messages",
-                    headers=self.headers,
+                    headers=request_headers,
+                    params=request_params,
                     json=payload
                 )
                 response.raise_for_status()
                 result = response.json()
                 if isinstance(result, dict) and "answer" in result:
                     result["answer"] = self._sanitize_text_artifacts(result.get("answer"))
+                if isinstance(result, dict):
+                    result.setdefault("trace_id", resolved_trace_id)
                 return result
             except httpx.HTTPStatusError as e:
                 error_detail = e.response.text
@@ -357,7 +376,8 @@ class DifyClient:
         query: str,
         user: str,
         conversation_id: Optional[str] = None,
-        inputs: Optional[Dict[str, Any]] = None
+        inputs: Optional[Dict[str, Any]] = None,
+        trace_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         Send a message to Dify API with streaming response.
@@ -371,25 +391,37 @@ class DifyClient:
         Yields:
             Streaming response chunks
         """
+        resolved_trace_id = self._ensure_trace_id(trace_id)
         payload = {
             "inputs": inputs or {},
             "query": query,
             "response_mode": "streaming",
             "conversation_id": conversation_id or "",
-            "user": user
+            "user": user,
+            "trace_id": resolved_trace_id
         }
+        request_headers = self._build_dify_request_headers(resolved_trace_id)
+        request_params = {"trace_id": resolved_trace_id}
+
+        yield json.dumps({
+            "event": "trace_context",
+            "trace_id": resolved_trace_id,
+            "workflow_run_id": "",
+            "task_id": ""
+        }, ensure_ascii=False)
         
         async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT_SECONDS, verify=settings.VERIFY_SSL) as client:
             try:
                 logger.info(f"=== DIFY STREAMING REQUEST ===")
                 logger.info(f"URL: {self.api_url}/chat-messages")
-                logger.info(f"Headers: {json.dumps(dict(self.headers), ensure_ascii=False)}")
+                logger.info(f"Headers: {json.dumps(dict(request_headers), ensure_ascii=False)}")
                 logger.info(f"Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}")
                 
                 async with client.stream(
                     "POST",
                     f"{self.api_url}/chat-messages",
-                    headers=self.headers,
+                    headers=request_headers,
+                    params=request_params,
                     json=payload
                 ) as response:
                     # Log response status
@@ -467,9 +499,8 @@ class DifyClient:
                                         logger.info(f"Message file: {json.dumps(event_json.get('file', {}), ensure_ascii=False)}")
                                         yield data
                                     elif event_type == "workflow_started":
-                                        # Workflow started - log only, don't show to user
-                                        logger.info(f"Workflow started (not sent to frontend)")
-                                        pass
+                                        logger.info(f"Workflow started event forwarded to frontend")
+                                        yield data
                                     elif event_type == "node_started":
                                         # Node started - log only, don't show to user
                                         logger.info(f"Node started (not sent to frontend)")

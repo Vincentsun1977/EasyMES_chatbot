@@ -9,6 +9,7 @@ class ChatRequest(BaseModel):
     query: str = Field(..., description="User message", min_length=1)
     conversation_id: Optional[str] = Field(None, description="Conversation ID for continuing chat")
     user: str = Field(..., description="User identifier (employee_id)")
+    trace_id: Optional[str] = Field(None, description="Optional trace ID for Dify distributed tracing")
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Additional inputs")
 
 

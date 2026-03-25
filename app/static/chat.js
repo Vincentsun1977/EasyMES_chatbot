@@ -1754,6 +1754,11 @@ class ChatBot {
         let messageDiv = null;
         let contentDiv = null;
         let difyMessageId = null;
+        let difyTraceState = {
+            workflow_run_id: null,
+            trace_id: null,
+            task_id: null
+        };
         let fullAnswer = '';
         let streamContentMode = null;
         let streamingUiReleased = false;
@@ -1787,6 +1792,7 @@ class ChatBot {
             } else if (contentDiv) {
                 this.setBotMarkdownContent(contentDiv, formattedAnswer);
             }
+
             this.scrollToBottom();
         };
         const acceptStreamContent = (mode, text, replace = false) => {
@@ -1875,6 +1881,19 @@ class ChatBot {
 
                             console.log('=== Received event:', json.event, '===');
                             console.log('[FULL JSON]', JSON.stringify(json, null, 2));
+
+                            const traceUpdate = this.extractDifyTraceInfo(json);
+                            let traceStateChanged = false;
+                            ['workflow_run_id', 'trace_id', 'task_id'].forEach((fieldName) => {
+                                const nextValue = traceUpdate[fieldName];
+                                if (nextValue && nextValue !== difyTraceState[fieldName]) {
+                                    difyTraceState[fieldName] = nextValue;
+                                    traceStateChanged = true;
+                                }
+                            });
+                            if (traceStateChanged) {
+                                console.log('[DIFY TRACE]', JSON.stringify(difyTraceState));
+                            }
                                 
                             // Handle chat message events
                             if (json.event === 'message') {
@@ -1892,6 +1911,7 @@ class ChatBot {
                                     
                                 // Only process if answer is not empty (ignore empty message events from workflow apps)
                                 if (answer) {
+                                    this.updateTypingStatus('正在生成回复');
                                     if (!acceptStreamContent('message', answer, false)) {
                                         continue;
                                     }
@@ -1951,6 +1971,7 @@ class ChatBot {
                                                 ? json.data
                                                 : '';
                                     if (typeof chunkText === 'string' && chunkText) {
+                                        this.updateTypingStatus('正在生成回复');
                                         if (!acceptStreamContent('chunk', chunkText, false)) {
                                             continue;
                                         }
@@ -1962,8 +1983,8 @@ class ChatBot {
                                 // 忽略 node_finished 事件
                                 console.log('[NODE_FINISHED EVENT] Ignored');
                             } else if (json.event === 'workflow_started' || json.event === 'node_started') {
-                                // 忽略 workflow/node started 事件
-                                console.log('[' + json.event.toUpperCase() + ' EVENT] Ignored');
+                                this.updateTypingStatus('正在处理问题');
+                                console.log('[' + json.event.toUpperCase() + ' EVENT] Status updated');
                             } else if (json.event === 'ping') {
                                 // Heartbeat event, keep stream alive
                                 console.debug('[PING EVENT] Keep-alive heartbeat');
@@ -2507,6 +2528,53 @@ class ChatBot {
         }
         return message.message_id || message.id || null;
     }
+
+    findFirstNestedValue(payload, keyNames, depth = 0, visited = new Set()) {
+        if (!payload || typeof payload !== 'object' || depth > 6 || visited.has(payload)) {
+            return null;
+        }
+
+        visited.add(payload);
+
+        if (Array.isArray(payload)) {
+            for (const item of payload) {
+                const nestedValue = this.findFirstNestedValue(item, keyNames, depth + 1, visited);
+                if (nestedValue) {
+                    return nestedValue;
+                }
+            }
+            return null;
+        }
+
+        for (const [key, value] of Object.entries(payload)) {
+            if (keyNames.includes(key) && value !== undefined && value !== null && String(value).trim()) {
+                return String(value);
+            }
+        }
+
+        for (const value of Object.values(payload)) {
+            const nestedValue = this.findFirstNestedValue(value, keyNames, depth + 1, visited);
+            if (nestedValue) {
+                return nestedValue;
+            }
+        }
+
+        return null;
+    }
+
+    extractDifyTraceInfo(payload) {
+        const workflowRunId = this.findFirstNestedValue(payload, ['workflow_run_id', 'workflowRunId'])
+            || ((payload?.event === 'workflow_started' || payload?.event === 'workflow_finished')
+                && typeof payload?.data?.id === 'string'
+                ? payload.data.id
+                : null);
+
+        return {
+            workflow_run_id: workflowRunId,
+            trace_id: this.findFirstNestedValue(payload, ['trace_id', 'traceId']),
+            task_id: this.findFirstNestedValue(payload, ['task_id', 'taskId'])
+        };
+    }
     
     showTypingIndicator() {
         const typingId = 'typing_' + Date.now();
@@ -2520,6 +2588,10 @@ class ChatBot {
         
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
+
+        const statusDiv = document.createElement('div');
+        statusDiv.className = 'typing-status-text';
+        statusDiv.textContent = '请求已提交';
         
         const typingDiv = document.createElement('div');
         typingDiv.className = 'typing-indicator';
@@ -2530,6 +2602,7 @@ class ChatBot {
         }
         
         contentDiv.appendChild(typingDiv);
+        contentDiv.appendChild(statusDiv);
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(contentDiv);
         
@@ -2537,6 +2610,15 @@ class ChatBot {
         this.scrollToBottom();
         
         return typingId;
+    }
+
+    updateTypingStatus(text) {
+        const statusEl = document.querySelector('.typing-status-text');
+        if (!statusEl) {
+            return;
+        }
+
+        statusEl.textContent = text;
     }
     
     removeMessage(messageId) {

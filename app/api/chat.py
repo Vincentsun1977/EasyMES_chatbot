@@ -95,13 +95,15 @@ async def chat(request: ChatRequest):
         logger.info(f"Query: '{request.query}'")
         logger.info(f"User: {request.user}")
         logger.info(f"Conversation ID: {request.conversation_id}")
+        logger.info(f"Trace ID: {request.trace_id}")
         logger.info(f"Inputs: {request.inputs}")
         
         response = await dify_client.send_message(
             query=request.query,
             user=request.user,
             conversation_id=request.conversation_id,
-            inputs=request.inputs
+            inputs=request.inputs,
+            trace_id=request.trace_id
         )
         
         logger.info(f"=== CHAT API RESPONSE ===")
@@ -133,6 +135,7 @@ async def chat_stream(request: ChatRequest):
     logger.info(f"Query: '{request.query}'")
     logger.info(f"User: {request.user}")
     logger.info(f"Conversation ID: {request.conversation_id}")
+    logger.info(f"Trace ID: {request.trace_id}")
     logger.info(f"Inputs: {request.inputs}")
     
     async def event_generator():
@@ -147,7 +150,8 @@ async def chat_stream(request: ChatRequest):
                     query=request.query,
                     user=request.user,
                     conversation_id=request.conversation_id,
-                    inputs=request.inputs
+                    inputs=request.inputs,
+                    trace_id=request.trace_id
                 ):
                     chunk_count += 1
                     logger.info(f"=== STREAM CHUNK {chunk_count} ===")

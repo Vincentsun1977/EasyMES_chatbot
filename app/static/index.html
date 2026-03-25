@@ -8,7 +8,7 @@
     <meta name="format-detection" content="telephone=no">
     <title>AI Chatbot</title>
     <link rel="icon" type="image/png" href="/static-debug/chatbot.png">
-    <link rel="stylesheet" href="/static-debug/chat.css?v=59">
+    <link rel="stylesheet" href="/static-debug/chat.css?v=61">
 </head>
 <body>
     <div class="chat-container">
@@ -55,7 +55,7 @@
                     <path d="M3 12h18M3 6h18M3 18h18"/>
                 </svg>
             </button>
-            <h2>小易 - EasyMES AI助手 <span class="header-version">V1.0.0-beta.2+build.20260321</span></h2>
+            <h2>小易 - EasyMES AI助手 <span class="header-version">v1.0.1-beta.2+build.20260325</span></h2>
             <div class="header-actions">
                 <button id="clearBtn" class="btn-icon" title="新对话">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -72,17 +72,16 @@
                 <div class="message-avatar bot-avatar">小易</div>
                 <div class="message-content">
                     <div class="markdown-body">
-                        <p>您好！我是小易，我可以回答关于 EasyMES 的相关问题，比如：</p>
+                        <p class="intro-text"><strong>您好！我是小易，我可以回答关于 EasyMES 的相关问题，比如：</strong></p>
                         <div class="markdown-section">
-                            <h3 class="markdown-h3 markdown-section-heading markdown-auto-heading">数据查询类型</h3>
                             <ul>
-                                <li><strong>产线数据</strong> - 某月某产线的转序数量</li>
-                                <li><strong>操作员信息</strong> - 某操作工人某天的完成数量</li>
-                                <li><strong>订单参数</strong> - 某订单或产品的参数</li>
+                                <li class="query-icon-item"><img src="/static-debug/Prod_line.png" alt="产线数据" class="inline-query-icon">  某月某产线的完成数量</li>
+                                <li class="query-icon-item"><img src="/static-debug/worker.png" alt="操作员信息" class="inline-query-icon">  某操作工人某天的完成数量</li>
+                                <li class="query-icon-item"><img src="/static-debug/Para.png" alt="订单参数" class="inline-query-icon">  某订单或产品的参数</li>
                             </ul>
                         </div>
                         <div class="markdown-section">
-                            <h3 class="markdown-h3 markdown-section-heading markdown-auto-heading">重要提示</h3>
+                            <h4 class="markdown-h4 markdown-section-heading markdown-auto-heading important-heading"><strong>重要提示</strong></h4>
                             <ul>
                                 <li>请尽量提供具体的信息，以便我更好地帮助您，比如订单号、工序名称、日期等。</li>
                                 <li>目前小易是在内测阶段，功能可能不完全稳定，欢迎反馈您的使用体验。😀</li>
@@ -117,6 +116,6 @@
         </div>
     </div>
 
-    <script src="/static-debug/chat.js?v=78"></script>
+    <script src="/static-debug/chat.js?v=83"></script>
 </body>
 </html>
